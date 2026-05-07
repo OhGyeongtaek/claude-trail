@@ -818,22 +818,33 @@ CI: GitHub Actions, Node 18/20/22 매트릭스. Windows 별도 잡(`windows-late
    - `ui/SubagentBlock.tsx`: Task 호출 라인 + done 마커 (§7) — 들여쓰기 자식은 M0.5 결과 조건부
    - **(조건부)** `lib/subagent.ts`: M0.5에서 `parent_session_id` 공식 필드 발견 시 attribution 구현. 미발견 시 v0.2로 이월 (§5.1.3 Case A/B).
    - **(v0.2 이월)** `lib/session-color.ts` (FNV-1a 8색 매핑) — v0.1은 단일 세션이라 불필요.
-5. **M3 — 누적 통계**
+5. **M3 — 누적 통계 (✅ 완료)**
    - Top files 막대 그래프 (§7 룰, 경로 전체 표시)
    - Tool별 카운터 (Tasks 포함)
-6. **M4 — 필터**
+6. **M4 — 필터 (✅ 완료)**
    - 확장자: `--md`, `--all` 플래그 + `f` 핫키 토글
    - Tool: `--tools <list>` 플래그 (Task 포함). `t` 핫키는 v0.2.
    - 두 필터의 AND 결합, 헤더에 상태 표시
    - control 이벤트는 tool 필터 무시 (§8)
-7. **M5 — 설치/제거 명령**
-   - `claude-trail init` + `claude-trail init --remove` (§11)
-   - 기존 settings.json 안전 병합 + 정밀 제거
-8. **M6 — 문서화 + 배포 준비**
-   - README (Privacy notice, Quick start, Hook 위치, 제거 방법, 알려진 한계 — 동시 다중 서브에이전트 misattribution 가능 등)
-   - 스크린샷, 라이선스 명확화
+   - **검증:** 6건의 헤드리스 통합 테스트 (`tests/filter.integration.test.ts`)
+     — 기본/--md/--tools/조합 모두 시나리오별 출력 검증.
+   - **TTY 의존:** `f` 핫키는 raw mode 필요 — 사용자가 실제 터미널에서 검증.
+7. **M5 — 설치/제거 명령 (✅ 완료)**
+   - `claude-trail init` + `claude-trail init --remove [--purge] [--yes]` (§11)
+   - 기존 settings.json 안전 병합 + 정밀 제거 (fingerprint 기반)
+   - 다른 도구 hook 보존, idempotent
+8. **M6 — 문서화 + 배포 준비 (✅ 완료)**
+   - README (Privacy notice, Quick start, "hooks load at session start" gotcha, 알려진 한계, 로드맵)
+   - LICENSE (MIT)
+   - 모형 화면 업데이트 (Task line + 서브에이전트 indent + /compact 흡수)
 
 각 마일스톤 끝에 사용자에게 확인 받음.
+
+### v0.1 done — 검증 통계 (2026-05-07)
+- **단위 + 통합 테스트:** 96건 통과 (`npm test`)
+- **E2E smoke:** init 4 시나리오, mapper 14 페이로드 replay, watch 라이브 갱신 — 모두 통과
+- **Hook cold start:** ~30 ms (macOS, p95 ≤ 100 ms 임계 내)
+- **푸시된 커밋:** 9건 (M0/M0.5/M1, DESIGN v1.0, M2, M2 fix, M3, M5, M6, M4)
 
 ## 18. 미해결 결정사항
 

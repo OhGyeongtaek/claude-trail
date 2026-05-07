@@ -97,12 +97,17 @@ Opens the live dashboard.
 | `--md` |   | Only `.md` / `.mdx` / `.markdown` |
 | `--tools <list>` | all | Comma-separated whitelist of tools, e.g. `--tools Read,Edit` (control events always show). Valid: `Read`, `Edit`, `Write`, `Glob`, `Grep`, `Task` |
 
-**Hotkeys**
+**Hotkeys** (require an interactive TTY — disabled when stdin is piped)
 
 | Key | Action |
 |-----|--------|
 | `f` | Cycle ext filter: `all` ↔ `md` |
 | `q` / `Ctrl+C` | Quit |
+
+To verify hotkeys: launch `claude-trail watch` directly in a real terminal,
+then press `f` — the `ext=…` token in the header should toggle between
+`all` and `md`, and `.ts`/`.tsx` lines should disappear/reappear in the
+stream accordingly.
 
 The `t` hotkey for live tool-filter cycling, the `c` counter reset, and stream search/scrollback are scheduled for v0.2.
 
