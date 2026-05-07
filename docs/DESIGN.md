@@ -3,7 +3,7 @@
 > Claude Code의 파일 상호작용, 컨텍스트 경계(`/clear`·`/compact`),
 > 서브에이전트 활동을 실시간 CLI 대시보드로 시각화하는 오픈소스 도구.
 
-- **상태:** Draft v0.8 (2026-05-07)
+- **상태:** Draft v0.9 (2026-05-07)
 - **저자:** 오경택
 - **위치:** `tools/claude-trail/` (현재 repo 내부, 추후 별도 repo로 분리 가능)
 - **라이선스:** MIT
@@ -11,6 +11,11 @@
 ---
 
 ## 1. 목적 (Goals)
+
+> **One-liner.** Claude Code 세션 중 *내 코드베이스 어디를 만지고 있고, 언제
+> 컨텍스트가 잘리고, 서브에이전트가 뭘 하는지* 다른 터미널에서 1초 만에 보이게.
+> `tail -f transcript.jsonl | jq`로는 못 만드는 통합 뷰 — 5종 hook 통합 +
+> control 경계 시각화 + 들여쓰기된 subagent 라인.
 
 1. **가시성 (Visibility):** Claude가 한 세션 동안 *어떤 파일과 상호작용했고
    언제 컨텍스트가 끊겼는지*(세션 시작/종료, `/compact`)를 시간순 이벤트 이력으로
@@ -24,6 +29,18 @@
 > "현재 컨텍스트에 살아있는 파일 스냅샷"이 아니다. 후자는 transcript 파싱이
 > 필요한 별개 기능 — v0.4 로드맵의 HTML export와 함께 검토.
 
+### 1.1 성공 지표 (v0.1 done 정의)
+
+설계가 아닌 *출시 가능 상태*의 합격선:
+
+- **Hook latency:** PostToolUse hook의 p95 ≤ **100 ms** (Node cold start 포함 현실 임계).
+  p99 ≤ 150 ms. 회귀 발생 시 CI 실패.
+- **첫 이벤트 표시:** `claude-trail watch` 시작 후 첫 라인이 화면에 뜰 때까지 ≤ 3 초
+  (events.jsonl 100 MB 기준).
+- **무손상 보장:** 1주 dogfooding 동안 *"Claude가 갑자기 멈췄다/느려졌다"* 사용자 리포트 0건.
+  hook은 §13 정책에 따라 절대 사용자 작업을 막지 않아야 함.
+- **이벤트 정확성:** 100회 수동 검증 시 events.jsonl과 화면 표시의 일치율 100%.
+
 ## 2. 비목적 (Non-goals, v0.1)
 
 - 웹/HTML 대시보드 — 추후 별도 패키지로.
@@ -35,12 +52,13 @@
 
 | # | 시나리오 | 사용자 행동 | 도구 출력 |
 |---|---------|------------|----------|
-| S1 | "지금 Claude가 뭘 보고 있지?" | 작업 중 다른 터미널에 `claude-trail watch` | 실시간 스트림 + 누적 통계 |
-| S2 | "마크다운 문서 위주로만 보고 싶다" | `claude-trail watch --md` 또는 TUI에서 `f` | md/mdx/markdown만 노출 |
-| S2b | "Read만 보고 싶다" (Edit/Write/Glob/Grep 노이즈 제거) | `claude-trail watch --tools Read` 또는 TUI에서 `t` | Read 이벤트만 노출 |
+| S1 | "방금까지 Claude가 어떤 파일을 만졌지?" | 작업 중 다른 터미널에 `claude-trail watch` | 시간순 이벤트 스트림 + 누적 통계 |
+| S2 | "마크다운만 / Read만 보고 싶다" | `--md`, `--tools Read` 플래그 또는 TUI 핫키 `f`/`t` | 필터된 이벤트만 노출 |
 | S3 | "어디에 접근이 몰리지?" | 같은 watch 화면 | Top files 막대그래프 |
-| S4 | "이 세션 끝나고 회고하고 싶다" | (v0.2) `claude-trail replay <session>` | 정적 타임라인 출력 |
-| S5 | "Claude가 서브에이전트로 뭘 시키고 있지?" | 같은 watch 화면 | Task 호출 + subagent_type/description, 서브에이전트의 내부 tool 호출(들여쓰기), 종료 요약 |
+| S4 | "Claude가 엉뚱한 파일을 보고 있다" → 즉시 인터럽트 | watch 라인 보고 Claude 세션에서 `Esc` | 인터벤션 트리거 — 도구 자체는 수동(가시성 제공) |
+| S5 | "왜 갑자기 컨텍스트가 좁아졌지?" → `/compact` 시점 확인 | 같은 watch 화면 | 가로 구분선 `─── /compact (auto) ───` |
+| S6 | "Claude가 서브에이전트로 뭘 시키고 있지?" | 같은 watch 화면 | Task 호출 라인 (v0.1) / 들여쓰기된 자식 라인 (M0.5에서 공식 필드 확인 시 v0.1, 아니면 v0.2) |
+| S7 | "세션 끝난 뒤 회고" | (v0.2) `claude-trail replay <session>` | 정적 타임라인 출력 |
 
 ## 4. 아키텍처
 
@@ -216,21 +234,24 @@ Claude Code가 보내는 페이로드와 매핑:
 |-----------------|---------|---------------|
 | `SubagentStop` | `stop_hook_active`(재진입 방지 플래그 — 무시), `subagent_session_id`(있다면) | `{tool:"_control", event:"subagent_stop", session:<subagent>, meta:{parent_task_id}}` |
 
-**서브에이전트 내부 tool 호출 attribution (best-effort, v0.1):**
+**서브에이전트 내부 tool 호출 attribution (조건부, M0.5 결과로 결정):**
 
-서브에이전트의 자체 tool 호출은 별도 `session_id`로 PostToolUse를 발화. 부모와의 연결은 두 단계:
+서브에이전트의 자체 tool 호출은 별도 `session_id`로 PostToolUse를 발화. 부모와의 연결을
+v0.1에 넣을지 결정은 **M0.5(§17) 실측 결과에 100% 의존**:
 
-1. **공식 필드가 있으면 사용:** Claude Code hook 페이로드에 `parent_session_id` 또는
-   `agent_context` 같은 필드가 들어오면 그대로 `meta.parent_task_id` 매핑 (실측 후 확정).
-2. **Fallback 휴리스틱 (watch 측에서):** 가장 최근 미완료 `Task` 이벤트 (= 아직
-   해당 task_id의 `subagent_stop`이 안 옴) 중 동일 cwd인 것에 묶음. 동시 다중 서브에이전트는
-   Task 호출과 첫 PostToolUse 시간차가 가장 작은 쌍을 매칭.
-   - 휴리스틱은 watch에서만 적용. events.jsonl 자체는 raw 그대로 유지 → v0.2 정식 attribution
-     로직이 같은 파일을 재해석할 수 있음.
-3. **표시:** 매칭된 서브에이전트의 tool 이벤트는 Stream에서 한 단계 들여쓰기 + `[<subagent_type>]` 라벨.
-4. **Nested 서브에이전트(Task → Task):** v0.1은 **1단계 들여쓰기로 평탄화**.
-   2단계 이상(서브가 또 다른 서브를 spawn)은 같은 들여쓰기 깊이에 `[parent▸child]`
-   결합 라벨로 표시. 깊이별 들여쓰기는 v0.2.
+- **Case A — 공식 필드 발견 시 (예: `parent_session_id`, `agent_context`):**
+  → v0.1에 정확한 attribution 포함. Stream에서 한 단계 들여쓰기 + `[<subagent_type>]` 라벨.
+- **Case B — 공식 필드 없음:**
+  → v0.1은 **`Task` 호출 라인만 표시**. 서브에이전트 내부 호출은 다른 session_id로
+  단순 노출 (들여쓰기/매칭 안 함). 휴리스틱 매칭은 잘못 묶일 시 신뢰 붕괴 위험이 더 큼 —
+  *틀린 정보 < 정보 없음*.
+  v0.2에서 transcript_path 파싱 또는 다른 신호로 정식 구현.
+
+**Nested 서브에이전트(Task → Task):** Case A인 경우 v0.1은 **1단계 들여쓰기로 평탄화**.
+2단계 이상은 같은 들여쓰기 깊이에 `[parent▸child]` 결합 라벨. 깊이별 들여쓰기는 v0.2.
+
+**v0.1 SubagentStop 이벤트:** Case A/B 무관하게 always 기록 — 종료 시점 + 부모 Task ID
+(공식 필드 있을 때만)는 회고용 가치 있음.
 
 **입력 크기 한계 + cwd 결정 우선순위:**
 - stdin은 buffered 1-shot read (Claude가 `tool_response` 큰 본문도 보낼 수 있음).
@@ -272,9 +293,12 @@ Options for `watch`:
 | 키 | 동작 |
 |----|------|
 | `f` | **확장자 필터** 사이클: all → md → all |
-| `t` | **Tool 필터** 사이클: all → Read → Edit → Write → Glob → Grep → all |
 | `q` / `Ctrl+C` | 종료 |
-| `c` | 화면 카운터 리셋 (v0.2) |
+| `t` | (v0.2) **Tool 필터** 사이클 — v0.1은 CLI `--tools` 플래그만 |
+| `/` | (v0.2) Stream 텍스트 검색 |
+| `space` | (v0.2) 일시정지/재개 (스트림 흐름 멈춤) |
+| `↑` / `↓` / `PgUp` / `PgDn` | (v0.2) Stream 스크롤백 |
+| `c` | (v0.2) 화면 카운터 리셋 |
 
 ## 7. TUI 화면 설계
 
@@ -284,15 +308,13 @@ Options for `watch`:
 │ Reads 32  Edits 4  Writes 1  Globs 2  Greps 7  Tasks 2     │
 ├─────────────────────────────────────────────────────────────┤
 │ Stream                                                      │
-│  14:32:18 [fcfa] READ   src/components/cards/Card.tsx       │
-│  14:32:11 [fcfa] GREP   "useState" in src/                  │
+│  14:32:18  R  READ   src/components/cards/Card.tsx          │
+│  14:32:11  g  GREP   "useState" in src/                     │
 │ ─── 14:32:00  /compact (auto) ───────────────────────────── │
-│  14:31:55 [fcfa] READ   gatsby-config.js                    │
-│  14:31:40 [fcfa] TASK   ⮕ Explore: "Find OAuth handlers"    │
-│  14:31:42 [a3b1]   ↳ READ  src/auth/oauth.ts   [Explore]    │
-│  14:31:45 [a3b1]   ↳ GREP  "callback" in auth/ [Explore]    │
-│  14:31:51 [a3b1]   ✓ Explore done · 1.3s · 4 calls          │
-│  14:31:52 [fcfa] EDIT   src/utils/animation/anim.ts         │
+│  14:31:55  R  READ   gatsby-config.js                       │
+│  14:31:40  T  TASK   ⮕ Explore: "Find OAuth handlers"       │
+│  14:31:51     ✓ Explore done · 1.3s · 4 calls               │
+│  14:31:52  E  EDIT   src/utils/animation/anim.ts            │
 │ ─── 14:30:00  session start (clear) ────────────────────── │
 │  …                                                          │
 ├─────────────────────────────────────────────────────────────┤
@@ -301,7 +323,7 @@ Options for `watch`:
 │  █████     gatsby-config.js                           5x    │
 │  ███       packages/web/package.json                  3x    │
 │  ██        src/index.ts                               2x    │
-└─ q quit · f ext-filter · t tool-filter ─────────────────────┘
+└─ q quit · f ext-filter ─────────────────────────────────────┘
 ```
 
 세 영역으로 구성:
@@ -323,6 +345,12 @@ Options for `watch`:
   `Glob`/`Grep` → green, `Task` → **brightBlue + bold** (Write/magenta와 분리).
 - 막대는 dim, 카운트는 bold.
 - 세션 short id `[xxxx]`은 §9의 FNV-1a 매핑 색.
+
+**색맹/접근성:** 색상에만 의존하지 않도록 **각 tool에 1글자 ASCII 마커**도 함께
+출력 — `R`(Read), `E`(Edit), `W`(Write), `G`(Glob), `g`(Grep, 소문자로 구분),
+`T`(Task). Stream 라인의 tool 컬럼은 `READ`/`EDIT` 같은 풀 이름을 유지하므로
+색이 안 보여도 식별 가능. deuteranopia/protanopia에서 yellow↔green, magenta↔red
+혼동에 대한 기본 안전장치.
 
 **경로 표시 규칙 (Stream + Top files 공통):**
 - 파일명만이 아니라 **프로젝트 루트 기준 상대경로 전체**를 표시.
@@ -395,23 +423,25 @@ Options for `watch`:
 **필터는 표시(stream + top files)에만 영향.** 헤더 카운터는 `(필터 N / 전체 M)` 둘 다 노출.
 필터 상태는 헤더에 `filter: ext=md tools=Read` 형식으로 한 줄 표시.
 
-## 9. 다중 세션 처리 (v0.1)
+## 9. 다중 세션 처리
 
 한 프로젝트에서 여러 Claude Code 인스턴스가 동시에 돌면 events.jsonl에
-세션이 섞여 들어옴. v0.1의 동작:
+세션이 섞여 들어옴.
 
-- **수집:** 모든 세션의 이벤트를 한 파일에 그대로 append.
-- **표시:** 기본적으로 **모든 세션을 합쳐 표시**.
-  Stream 라인 앞에 세션 short id (`fcfa`)를 색칠해 구분.
-- **활성 세션:** "가장 최근 이벤트가 발생한 세션"을 헤더에 표시.
-  5초 이상 idle하고 다른 세션이 활성이면 헤더 갱신.
-- **단일 세션 격리는 v0.2:** `--session <id>` 플래그로.
-- **세션 색상 매핑:** 세션 ID의 FNV-1a 32-bit 해시 → 8색 안전 팔레트
-  (cyan/yellow/magenta/green/blue/red/white/gray) 인덱스. 같은 세션은
-  watch 재시작에도 같은 색. tool 색(§7)과 충돌하지 않게 short id 배경에만 적용.
+**v0.1 동작 (단순화):**
+- **수집:** 모든 세션의 이벤트를 한 파일에 그대로 append (변경 없음).
+- **표시:** **가장 최근 이벤트가 발생한 세션 한 개만** Stream에 표시.
+  헤더에 `session fcfacf43…` 표기. 다른 세션의 이벤트는 *수집은 되지만 화면 노출 안 됨*.
+- **활성 세션 전환:** 5초 이상 idle한 후 다른 세션이 이벤트를 발화하면 자동 전환.
+  전환 시 `─── now showing session 7d8a… ───` 가로 구분선 표시.
 
-**근거:** v0.1 사용자는 보통 한 세션만 운용. 두 세션이 겹칠 때
-섞임이 *보이는* 게 *없는 것보다* 낫다(혼동을 알아챌 수 있음).
+**근거:** 다중 세션 머지 + FNV 색상 매핑은 v0.1 가치 대비 복잡도가 높음
+(기획자 리뷰). 대부분의 사용자는 단일 세션 운용. 동시 다중 세션은 v0.2 정식 처리.
+
+**v0.2 예정:**
+- 모든 세션 합쳐 표시 + Stream 라인에 세션 short id prefix.
+- `--session <id>` 격리.
+- FNV-1a 32-bit 해시 → 8색 안전 팔레트(cyan/yellow/magenta/green/blue/red/white/gray) 매핑.
 
 ## 10. 파일/패키지 구조
 
@@ -558,12 +588,21 @@ v0.1은 *"파일 상호작용 + 컨텍스트 경계"*를 좁게 정의.
 **Hook 동작:**
 - stdin으로 JSON 입력 받음 (Claude Code 표준).
 - 실패해도 항상 exit 0. 사용자의 작업을 절대 막지 않음.
-- 5ms 내 종료 목표 (단순 append). 이를 위해 hook 진입점은 **React/Ink 트리 전혀 미참조**
-  (§10 진입점 분리).
-- **동시성:** `fs.appendFileSync(path, line + "\n")`는 POSIX `O_APPEND`로
-  열려 한 번의 `write()`로 nl-terminated 라인을 보냄. 라인 길이가
-  `PIPE_BUF`(macOS/Linux 일반 4 KB) 이하인 한 다중 hook 동시 append에서
-  라인 섞임 없음.
+- **Latency 임계 (현실 기준):** Node.js cold start만으로 macOS 30–60ms,
+  Linux 50–80ms, Windows 80–150ms 소요. 5ms는 비현실적. v0.1 합격선:
+  **p95 ≤ 100 ms, p99 ≤ 150 ms**(§1.1). 이 이상은 hook 자체를 Go/Rust로
+  네이티브 분리해야 함 — v1.0 검토.
+- 이를 위해 hook 진입점은 **React/Ink 트리 전혀 미참조** (§10 진입점 분리).
+- **동시성:** `fs.appendFileSync(path, line + "\n")`는 내부적으로
+  `open(O_APPEND|O_WRONLY)` + 단일 `write(2)` 시퀀스를 사용. **single-write
+  append + 1 KB 라인 cap**의 조합으로 OS별 best-effort atomic을 노림:
+  - **Linux**: 사실상 atomic (단일 write 시 ext4/btrfs 모두 안전).
+  - **macOS (APFS/HFS+)**: 단일 write 한도(1 MB 미만) 내 atomic.
+  - **Windows (NTFS/ReFS)**: POSIX 보장 없음 — 1 KB 라인이라도 라인 섞임 가능.
+    이론적 위험은 인지하되 실측 빈도가 낮으면 v0.1 수용, 발견 시 lock 도입.
+
+  POSIX의 `PIPE_BUF` atomic 보장은 **pipe/FIFO 한정**이지 regular file 보장이
+  아니므로 표현 정정.
 - **라인 길이 상한:** 각 이벤트 라인은 최대 **1 KB**. 초과 시 긴 필드(query, path)를
   말줄임 + `meta.truncated = true`.
 
@@ -572,10 +611,18 @@ v0.1은 *"파일 상호작용 + 컨텍스트 경계"*를 좁게 정의.
 - 이벤트는 *경로와 메타데이터*만 기록. **파일 내용은 절대 기록하지 않음.**
   - Read 본문, Grep 매칭 라인, Edit old/new_string, Write content **모두 폐기**.
   - 단, Grep query 자체는 `meta.query`에 저장 (사용자 의도 추적용).
+  - Task의 description도 저장 (서브에이전트 가시화 핵심).
   - Read의 line count도 v0.1에서는 저장 안 함 (불필요한 누설 가능).
 - 로그는 프로젝트 로컬 (`.claude-trail/`). 외부 전송 없음.
 - gitignore로 커밋 방지. README에 명시.
-- `init` 시 사용자에게 "이 도구는 파일 경로/검색어를 로컬 디스크에 기록합니다" 한 줄 고지.
+- `init` 시 사용자에게 **"이 도구는 다음을 로컬 디스크에 기록합니다: 파일 경로 / Grep 검색어 /
+  서브에이전트 description"** 명시 + `y` 확인.
+
+**v0.2 redaction 옵션 (민감 코드베이스용):**
+- `--redact-paths`: path를 SHA-256(8자) 해시로 대체. Top files는 해시별 카운트만.
+- `--redact-grep`: `meta.query` 문자열을 `<redacted>`로 대체. tool/path만 보존.
+- `--redact-task-desc`: Task description을 `<redacted>`로 대체.
+- 위 옵션은 `init` 시점 또는 events.jsonl 작성 시점에 적용 (사후 redaction은 v0.3).
 
 ## 13. 에러 처리 / 복구
 
@@ -583,6 +630,12 @@ v0.1은 *"파일 상호작용 + 컨텍스트 경계"*를 좁게 정의.
 - 모든 예외를 try/catch로 잡아 `.claude-trail/hook.error.log`에 한 줄 append 후 exit 0.
 - error.log는 회전 없음 (v0.1). 사용자가 수동 점검.
 - events.jsonl 디렉터리 생성 실패(권한) → error.log에만 기록, 조용히 exit 0.
+
+**디스크 폭주 안전망 (v0.1):**
+- events.jsonl 크기가 **100 MB를 초과하면** 신규 append를 거부 + error.log에 1회 경고
+  ("events.jsonl exceeded 100 MB cap; further events dropped — run `claude-trail rotate` (v0.3) or delete manually").
+- watch 측은 헤더에 `! disk cap reached` 빨간 표시.
+- 정식 일자별 롤오버는 v0.3.
 
 **Watch 측 (적극 회복):**
 - events.jsonl이 없으면 → "Waiting for first event…" 화면 + 디렉터리 polling.
@@ -607,6 +660,9 @@ events.jsonl을 실시간으로 따라잡기 위한 알고리즘:
    증분만 읽음 → 라인 분리 → 파싱 → 화면 갱신 → offset = newSize.
 4. **회전/삭제 감지:** `change` 이벤트에서 size가 *작아지면* truncate/회전.
    inode를 `fs.statSync().ino` 비교로 검증, 다르면 fs.watch 재바인딩 + offset 0부터.
+   - **알려진 race (v0.3 회전 도입 시):** rename → 새 파일 생성 → 우리의 watch 재바인딩
+     사이에 새 파일에 들어온 라인은 유실 가능. v0.3에 *dual-watcher 패턴* 명시 — 회전된
+     old fd는 EOF까지 잔류 read, new path는 별도 open. v0.1은 회전 없음(§16)이라 회피.
 5. **Polling fallback:** Windows 또는 fs.watch 미동작 시 200ms 간격 stat 폴링으로 자동 전환
    (`EVENTS_POLL_MS` 환경변수로 조정 가능).
 6. **부분 라인 버퍼:** 마지막 청크가 `\n`으로 끝나지 않으면 다음 read까지 보류.
@@ -626,9 +682,15 @@ events.jsonl을 실시간으로 따라잡기 위한 알고리즘:
 - hook이 *어떤 입력에도* exit 0인가 (잘못된 JSON, 빈 stdin, 누락 필드, 거대 페이로드).
 - events.jsonl이 read-only일 때 hook이 작업을 막지 않는가.
 - 손상된 라인이 섞인 events.jsonl에서 watch가 정상 라인을 정확히 표시하는가.
-- 동시 다중 서브에이전트에서 attribution 휴리스틱이 결정적(deterministic)으로 동작하는가
-  — 같은 입력 시퀀스에 대해 항상 같은 매칭.
 - `init --remove`가 다른 도구의 hook을 건드리지 않는가.
+- 100 MB cap 초과 시 hook이 silent drop + 사용자 작업 영향 없는가.
+
+**성능/비결정성 테스트 (§1.1 합격선 검증):**
+- Hook cold-start latency 회귀 테스트: macOS/Linux/Windows 각 100회 실행 → p95/p99 측정,
+  CI에서 임계 초과 시 실패.
+- Tail parser property-based 테스트: 임의 길이/위치에서 청크 분할 → 라인 복원 정확도.
+- 회전 fuzz 테스트 (v0.3): rename + concurrent append 시 라인 유실 검출.
+- Windows polling 통합 테스트: 200 ms 간격에서 burst 이벤트(100 events/sec) 누락 여부.
 
 CI: GitHub Actions, Node 18/20/22 매트릭스. Windows 별도 잡(`windows-latest`).
 
@@ -659,11 +721,16 @@ CI: GitHub Actions, Node 18/20/22 매트릭스. Windows 별도 잡(`windows-late
 
 | 버전 | 기능 |
 |------|------|
-| v0.1 | watch(live) + init/`init --remove` + 5종 hook + 확장자/tool 필터 + control 이벤트(`/clear`,`/compact`) + 서브에이전트 호출 가시화(best-effort attribution) |
-| v0.2 | replay, `--ext` 커스텀, 세션 셀렉터(`--session`), 카운터 리셋(`c`), MultiEdit/NotebookEdit 매핑, 서브에이전트 정식 attribution(공식 필드), `--include-prompts`/`--include-task-prompts` 옵트인, `--exclude-subagents`, `--lookback`, 멀티 tool 선택, 비대화 init(`--yes`) |
-| v0.3 | 글로벌 설치 (`npm i -g`), `~/.claude-trail/` 통합, Bash 옵트인 매핑, 일자별 롤오버 + 100MB 상한, `init --include-bash` |
+| v0.1 | watch(live) + init/`init --remove` + 5종 hook + 확장자 필터(`f`) + CLI tool 필터(`--tools`) + control 이벤트(`/clear`,`/compact`) + Task 호출 가시화 + 활성 세션 단일 표시 + 디스크 100MB 안전망 |
+| v0.2 | replay, `--ext` 커스텀, 다중 세션 머지/색상(FNV 8색), 세션 셀렉터(`--session`), TUI tool 필터(`t`), 검색(`/`)/일시정지(`space`)/스크롤(`↑↓`), 카운터 리셋(`c`), MultiEdit/NotebookEdit 매핑, 서브에이전트 attribution(M0.5에서 공식 필드 미발견 시 이쪽), `--redact-paths`/`--redact-grep`/`--redact-task-desc`, `--include-prompts`/`--include-task-prompts` 옵트인, `--exclude-subagents`, `--lookback`, 멀티 tool 선택, 비대화 init(`--yes`) |
+| v0.3 | 글로벌 설치 (`npm i -g`), `~/.claude-trail/` 통합, Bash 옵트인 매핑, 일자별 롤오버 + dual-watcher 회전 처리, `init --include-bash`, 사후 redaction 도구 |
 | v0.4 | HTML export(정적 리포트), 세션 비교, "현재 컨텍스트 살아있는 파일" 스냅샷(transcript 파싱) |
-| v1.0 | 별도 repo 분리, npm 정식 배포 |
+| v1.0 | 별도 repo 분리, npm 정식 배포, hook 네이티브(Go/Rust) 분리 검토 |
+
+**v0.1에서 cut된 항목 (리뷰 결과 반영):**
+- 서브에이전트 attribution 휴리스틱 → 공식 필드 발견(M0.5)에 조건부. 미발견 시 v0.2.
+- 다중 세션 머지/Stream short id 색상 → v0.2.
+- TUI tool 필터 핫키(`t`) → v0.2 (CLI는 v0.1).
 
 ## 17. 구현 단계 (마일스톤)
 
@@ -696,19 +763,19 @@ CI: GitHub Actions, Node 18/20/22 매트릭스. Windows 별도 잡(`windows-late
 4. **M2 — TUI 골격**
    - Ink + JSX(.tsx) 셋업
    - `lib/tail.ts`: prefill + fs.watch + offset/inode 추적 (§13.1)
-   - `commands/watch.tsx`: events.jsonl tail
+   - `commands/watch.tsx`: events.jsonl tail (활성 세션 1개만 표시)
    - 헤더 + 스트림만 (top files 없이)
    - `ui/formatPath.ts`: 경로 표시 규칙 (§7) — basename 강조 + 가운데 말줄임
-   - `ui/ControlMarker.tsx`: control 이벤트 가로 구분선 렌더 (§7)
-   - `ui/SubagentBlock.tsx`: Task 호출 + 들여쓰기된 자식 라인 + done 마커 (§7)
-   - `lib/subagent.ts`: best-effort attribution (§5.1.3) — 부모 task_id 매칭
-   - `lib/session-color.ts`: FNV-1a → 8색 매핑 (§9)
+   - `ui/ControlMarker.tsx`: control 이벤트 가로 구분선 + 활성 세션 전환 마커 (§7, §9)
+   - `ui/SubagentBlock.tsx`: Task 호출 라인 + done 마커 (§7) — 들여쓰기 자식은 M0.5 결과 조건부
+   - **(조건부)** `lib/subagent.ts`: M0.5에서 `parent_session_id` 공식 필드 발견 시 attribution 구현. 미발견 시 v0.2로 이월 (§5.1.3 Case A/B).
+   - **(v0.2 이월)** `lib/session-color.ts` (FNV-1a 8색 매핑) — v0.1은 단일 세션이라 불필요.
 5. **M3 — 누적 통계**
    - Top files 막대 그래프 (§7 룰, 경로 전체 표시)
    - Tool별 카운터 (Tasks 포함)
 6. **M4 — 필터**
    - 확장자: `--md`, `--all` 플래그 + `f` 핫키 토글
-   - Tool: `--tools <list>` 플래그 + `t` 핫키 사이클 (Task 포함)
+   - Tool: `--tools <list>` 플래그 (Task 포함). `t` 핫키는 v0.2.
    - 두 필터의 AND 결합, 헤더에 상태 표시
    - control 이벤트는 tool 필터 무시 (§8)
 7. **M5 — 설치/제거 명령**
