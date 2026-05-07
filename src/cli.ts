@@ -30,6 +30,7 @@ Usage:
 
 Commands:
   watch              Live TUI dashboard (M1)
+  replay <session>   Static walkthrough of a finished session (v0.2)
   init               Install hooks into .claude/settings.json (M2)
   init --remove      Remove this tool's hooks
   hook               (internal) stdin adapter for Claude Code hooks
@@ -55,6 +56,10 @@ async function main(argv: string[]): Promise<number> {
     case 'watch': {
       const { runWatch } = await import('./commands/watch.js');
       return runWatch(rest);
+    }
+    case 'replay': {
+      const { runReplay } = await import('./commands/replay.js');
+      return runReplay(rest);
     }
     case 'init': {
       const { runInit } = await import('./commands/init.js');
