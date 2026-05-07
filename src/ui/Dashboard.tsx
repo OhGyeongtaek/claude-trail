@@ -11,6 +11,7 @@ import {
 } from './viewState.js';
 import { Header } from './Header.js';
 import { Stream } from './Stream.js';
+import { TopFiles } from './TopFiles.js';
 import { startTail, type TailHandle, type TailStats } from '../lib/tail.js';
 
 export interface DashboardProps {
@@ -133,8 +134,15 @@ export const Dashboard: React.FC<DashboardProps> = ({
     return <Text>claude-trail: terminal too narrow (need ≥60 cols)</Text>;
   }
 
-  // Reserve rows: header(4) + separator(1) + footer(1) + slack(1) = 7.
-  const streamHeight = Math.max(3, rows - 7);
+  // Row budget allocation (§7 priority: Header → Stream → TopFiles).
+  // Reserved: header(4) + 2 separators + footer(1) + slack(1) = 8.
+  // TopFiles gets ~1/3, Stream gets remainder. TopFiles disappears
+  // first when window shrinks below ~12 rows.
+  const reserved = 8;
+  const flexRows = Math.max(3, rows - reserved);
+  const showTopFiles = state.topFiles.size > 0 && flexRows >= 8;
+  const topFilesHeight = showTopFiles ? Math.min(8, Math.floor(flexRows / 3)) : 0;
+  const streamHeight = flexRows - topFilesHeight;
   const uptimeSec = Math.floor((now - startedAt) / 1000);
   const ruleWidth = Math.max(0, cols - 1);
 
@@ -148,6 +156,12 @@ export const Dashboard: React.FC<DashboardProps> = ({
         width={cols}
       />
       <Stream events={state.events} width={cols} height={streamHeight} />
+      {showTopFiles ? (
+        <>
+          <Text dimColor>{'─'.repeat(ruleWidth)}</Text>
+          <TopFiles topFiles={state.topFiles} rows={topFilesHeight} width={cols} />
+        </>
+      ) : null}
       <Text dimColor>{'─'.repeat(ruleWidth)}</Text>
       <Footer
         width={cols}
