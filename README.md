@@ -13,28 +13,32 @@ renders the stream as a live Ink TUI.
 
 ```
 claude-trail · live                                                 filter: ext=all tools=all
-session 156ec647 · uptime 03:22
+[156e] 03:22:14  [7d8a] 00:08:01 · uptime 03:22
 Reads 32  Edits 4  Writes 1  Globs 2  Greps 7  Tasks 2
 ─────────────────────────────────────────────────────────────────────────────────────────────
-14:32:18 R READ   src/components/cards/Card.tsx
-14:32:11 g GREP   "useState" in src/
+[156e] 14:32:18 R READ   src/components/cards/Card.tsx
+[156e] 14:32:11 g GREP   "useState" in src/
+[7d8a] ─── 14:32:05  session start (startup)  ──────────────────────────────────────────────
 ─── 14:32:00  /compact (auto) ──────────────────────────────────────────────────────────────
-14:31:55 R READ   gatsby-config.js
-14:31:40 T TASK  ⮕ Explore: "Find OAuth handlers"
-14:31:46 R READ   ↳ src/auth/oauth.ts                                                [Explore]
-14:31:51 g GREP   ↳ "callback" in src/auth/                                          [Explore]
+[156e] 14:31:55 R READ   gatsby-config.js
+[156e] 14:31:40 T TASK  ⮕ Explore: "Find OAuth handlers"
+[156e] 14:31:46 R READ   ↳ src/auth/oauth.ts                                        [Explore]
+[156e] 14:31:51 g GREP   ↳ "callback" in src/auth/                                  [Explore]
 ─── 14:31:53  [Explore] done ───────────────────────────────────────────────────────────────
-14:31:52 E EDIT   src/utils/animation/anim.ts
+[156e] 14:31:52 E EDIT   src/utils/animation/anim.ts
 ─────────────────────────────────────────────────────────────────────────────────────────────
 Top files
 ████████████  src/components/cards/Card.tsx                                              10x
 ██████        gatsby-config.js                                                            5x
 ████          src/index.ts                                                                3x
 ─────────────────────────────────────────────────────────────────────────────────────────────
-q quit · f ext-filter
+q quit · f ext · t tools · / search · ↑/PgUp scroll · Esc resume
 ```
 
-**Status:** v0.1 — work in progress. Spec lives in [`docs/DESIGN.md`](./docs/DESIGN.md).
+> The `[xxxx]` tag and per-session uptime line only appear when ≥2 sessions
+> are visible. Single-session view stays clean.
+
+**Status:** v0.2 — see roadmap below. Spec lives in [`docs/DESIGN.md`](./docs/DESIGN.md).
 
 ---
 
@@ -45,7 +49,7 @@ q quit · f ext-filter
 - **Subagents**: every `Task` call is shown; tool calls *inside* a subagent are indented and tagged with `[<agent_type>]` for clean attribution.
 
 `Bash`, `WebFetch`, `WebSearch`, `MultiEdit`, `NotebookRead`, `NotebookEdit`,
-and `UserPromptSubmit` are **out of scope for v0.1** (privacy or signal-vs-noise reasons — see [DESIGN.md §11](./docs/DESIGN.md)).
+and `UserPromptSubmit` are **out of scope** (privacy or signal-vs-noise reasons — see [DESIGN.md §11](./docs/DESIGN.md)).
 
 ## Requirements
 
@@ -53,7 +57,7 @@ and `UserPromptSubmit` are **out of scope for v0.1** (privacy or signal-vs-noise
 - **Claude Code** with hook support (any recent build)
 - A **TTY** for `watch` and the `init` confirmation prompt (use `--yes` in scripts)
 
-## Install (v0.1 — local mode)
+## Install (local mode)
 
 `claude-trail` is not on npm yet. Until v0.3 (global install), run it from a clone:
 
@@ -95,21 +99,49 @@ Opens the live dashboard.
 |------|---------|--------|
 | `--all` | ✓ | Show every file extension |
 | `--md` |   | Only `.md` / `.mdx` / `.markdown` |
+| `--ext <list>` |   | Explicit comma-separated extension whitelist, e.g. `--ext .ts,.tsx,.md`. Each entry must start with `.`; takes precedence over `--md` |
 | `--tools <list>` | all | Comma-separated whitelist of tools, e.g. `--tools Read,Edit` (control events always show). Valid: `Read`, `Edit`, `Write`, `Glob`, `Grep`, `Task` |
+| `--since <duration>` |   | Drop prefill events older than the cutoff. Format `<N><unit>` where unit is `s`, `m`, `h`, or `d`. Example: `--since 30m` |
 
 **Hotkeys** (require an interactive TTY — disabled when stdin is piped)
 
 | Key | Action |
 |-----|--------|
 | `f` | Cycle ext filter: `all` ↔ `md` |
+| `t` | Cycle tool filter: `all` → `Read,Edit,Write` → `Read` → `Task` → `all` |
+| `/` | Open inline search input. Substring (case-insensitive) filter applied to the rendered stream. `Enter` commits, `Esc` clears |
+| `↑` / `↓` / `PgUp` / `PgDn` | Scroll the stream. Pauses live tail and shows `PAUSED — N new events` indicator until you scroll back to the bottom or press `Esc` |
+| `Esc` | Resume live mode (clears search query and scroll anchor) |
 | `q` / `Ctrl+C` | Quit |
 
-To verify hotkeys: launch `claude-trail watch` directly in a real terminal,
-then press `f` — the `ext=…` token in the header should toggle between
-`all` and `md`, and `.ts`/`.tsx` lines should disappear/reappear in the
-stream accordingly.
+### `claude-trail replay <session_id>`
 
-The `t` hotkey for live tool-filter cycling, the `c` counter reset, and stream search/scrollback are scheduled for v0.2.
+Plays a finished session back from `events.jsonl` in a non-live walkthrough.
+Useful for reviewing what Claude did after the fact without touching the
+live watcher.
+
+| Flag | Effect |
+|------|--------|
+| `--from HH:MM:SS` | Only events at or after this local time-of-day |
+| `--to HH:MM:SS` | Only events at or before this local time-of-day |
+
+**Playback controls** (TTY required)
+
+| Key | Action |
+|-----|--------|
+| `space` | Pause / resume |
+| `→` / `←` | Step one event forward / back (auto-pauses) |
+| `+` / `-` | Speed: cycles `0.25× → 0.5× → 1× → 2× → 4× → 8×` |
+| `q` / `Ctrl+C` | Quit |
+
+```bash
+# Find a recent session id and replay it
+SID=$(tail -n 200 .claude-trail/events.jsonl | jq -r .session | sort -u | head -1)
+node /path/to/claude-trail/bin/claude-trail.js replay "$SID"
+```
+
+Non-TTY invocations exit with `requires a TTY`. Unknown session ids exit
+with `no events found`.
 
 ### `claude-trail init`
 
@@ -214,12 +246,15 @@ Full design rationale, M0.5 measurement results, and trade-offs: [`docs/DESIGN.m
 
 - Hook cold start: **~30 ms** (macOS). Budget: p95 ≤ 100 ms (DESIGN §1.1).
 - `watch` first frame: < 1 s on a 100 MB log.
-- Memory: stream is capped at 200 events; counters stay in a small Map.
+- Memory: stream is capped at 1000 events (raised from 200 in v0.2 to support
+  meaningful scrollback); counters stay in a small Map.
 
-## Limitations (v0.1)
+## Limitations
 
 - **Hooks are loaded at session start.** Run `init` *before* opening a Claude Code session.
-- **Single active session in TUI.** The log records all sessions; the viewer focuses on the most recent one. Multi-session merge is v0.2.
+- **Aggregate counters across sessions.** The header counters (Reads / Edits /
+  Writes / …) sum across all visible sessions. Per-session counters are a
+  v0.3 candidate.
 - **No global install yet** — the `init` command writes a project-relative hook path. v0.3 ships `claude-trail-hook` as a global binary.
 - **No matcher enforcement assumption.** Some `claude -p` headless invocations fire PostToolUse for tools outside our matcher; the hook adapter has its own whitelist as a safety net.
 - **Subagent attribution requires Claude Code's `agent_id` field** (verified in M0.5). If a future Claude Code release changes the field name, attribution falls back to plain stream output until a new release ships.
@@ -228,9 +263,9 @@ Full design rationale, M0.5 measurement results, and trade-offs: [`docs/DESIGN.m
 
 | Version | Scope |
 |---------|-------|
-| **v0.1** (current) | live `watch`, `init` / `init --remove`, file events, subagent attribution, `/compact` lifecycle |
-| v0.2 | multi-session merge with FNV color coding, `t` hotkey for tool filter, stream search & scrollback, `replay <session>`, `--ext` custom list |
-| v0.3 | global `npm i -g`, opt-in Bash matcher, daily log rotation, post-hoc redaction tool |
+| v0.1 | live `watch`, `init` / `init --remove`, file events, subagent attribution, `/compact` lifecycle |
+| **v0.2** (current) | ✅ multi-session merge with FNV-1a color coding, ✅ `t` hotkey for tool filter, ✅ stream search (`/`) + scrollback (`↑`/`↓`/`PgUp`/`PgDn`), ✅ `replay <session>`, ✅ `--ext` custom list, ✅ `--since <duration>` |
+| v0.3 | global `npm i -g`, opt-in Bash matcher, daily log rotation, post-hoc redaction tool, per-session counters, `c` counter reset, `space` pause hotkey for `watch` |
 | v0.4 | static HTML export, session diff, "files alive in current context" snapshot |
 | v1.0 | npm release, native (Go/Rust) hook for sub-millisecond cold start |
 
@@ -242,7 +277,7 @@ PRs welcome. Before non-trivial work, open an issue or check
 Run the tests:
 
 ```bash
-npm test            # node --test + tsx, ~90 unit tests
+npm test            # node --test + tsx (124 tests as of v0.2)
 npm run build       # tsc strict
 ```
 
