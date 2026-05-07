@@ -62,8 +62,11 @@ export const Dashboard: React.FC<DashboardProps> = ({
   });
   const { exit } = useApp();
   const { stdout } = useStdout();
-  const cols = stdout?.columns ?? 100;
-  const rows = stdout?.rows ?? 24;
+  // Env first — shells keep COLUMNS/LINES current on resize, and Ink
+  // defaults to 80 cols when stdout isn't a TTY which can mask the real
+  // value in piped/test scenarios.
+  const cols = pickInt(process.env['COLUMNS'], stdout?.columns, 100);
+  const rows = pickInt(process.env['LINES'], stdout?.rows, 24);
 
   // Width policy (§7): minimum 60 columns.
   const tooNarrow = cols < 60;
@@ -130,9 +133,10 @@ export const Dashboard: React.FC<DashboardProps> = ({
     return <Text>claude-trail: terminal too narrow (need ≥60 cols)</Text>;
   }
 
-  // Reserve rows: header(4) + footer(1) + slack(1) = 6 → stream gets rows-6.
-  const streamHeight = Math.max(3, rows - 6);
+  // Reserve rows: header(4) + separator(1) + footer(1) + slack(1) = 7.
+  const streamHeight = Math.max(3, rows - 7);
   const uptimeSec = Math.floor((now - startedAt) / 1000);
+  const ruleWidth = Math.max(0, cols - 1);
 
   return (
     <Box flexDirection="column">
@@ -144,6 +148,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
         width={cols}
       />
       <Stream events={state.events} width={cols} height={streamHeight} />
+      <Text dimColor>{'─'.repeat(ruleWidth)}</Text>
       <Footer
         width={cols}
         errors={tailErrors}
@@ -154,17 +159,32 @@ export const Dashboard: React.FC<DashboardProps> = ({
   );
 };
 
+function pickInt(...values: Array<number | string | undefined>): number {
+  for (const v of values) {
+    if (typeof v === 'number' && Number.isFinite(v) && v > 0) return Math.floor(v);
+    if (typeof v === 'string') {
+      const n = Number.parseInt(v, 10);
+      if (Number.isFinite(n) && n > 0) return n;
+    }
+  }
+  return 0;
+}
+
 const Footer: React.FC<{
   width: number;
   errors: number;
   parseErrors: number;
   oversize: number;
 }> = ({ width, errors, parseErrors, oversize }) => {
-  const left = ' q quit · f ext-filter ';
-  const right =
-    errors + parseErrors + oversize > 0
-      ? `errs:${errors} parse:${parseErrors} drop:${oversize}`
-      : '';
-  const hint = `└${left}${'─'.repeat(Math.max(0, width - left.length - right.length - 2))}${right}─┘`;
-  return <Text dimColor>{hint}</Text>;
+  const showStats = errors + parseErrors + oversize > 0;
+  return (
+    <Box justifyContent="space-between" width={width}>
+      <Text dimColor>q quit · f ext-filter</Text>
+      {showStats ? (
+        <Text dimColor>{`errs:${errors} parse:${parseErrors} drop:${oversize}`}</Text>
+      ) : (
+        <Text> </Text>
+      )}
+    </Box>
+  );
 };

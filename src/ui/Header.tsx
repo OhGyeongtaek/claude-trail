@@ -1,5 +1,9 @@
 // TUI header — session id, uptime, filter status, counters.
 // Spec: docs/DESIGN.md §7.
+//
+// Layout uses Ink's flexbox + space-between so terminal width math is
+// owned by Ink, not us. No ASCII box drawing here — that breaks under
+// resize / East-Asian-wide characters.
 
 import React from 'react';
 import { Box, Text } from 'ink';
@@ -21,17 +25,20 @@ export const Header: React.FC<HeaderProps> = ({
   filter,
   width,
 }) => {
-  const titleLine = pad(`┌─ claude-trail · live ─── filter: ${describeFilter(filter)} `, width, '─') + '┐';
-  const sessionLine = `│ ${session ? `session ${shortId(session)}` : 'no active session'} · uptime ${formatDuration(uptimeSec)}`;
-  const counterLine = `│ Reads ${counters.Read}  Edits ${counters.Edit}  Writes ${counters.Write}  Globs ${counters.Glob}  Greps ${counters.Grep}  Tasks ${counters.Task}`;
-  const sep = pad('├', width, '─') + '┤';
-
+  const ruleWidth = Math.max(0, width - 1);
   return (
     <Box flexDirection="column">
-      <Text dimColor>{titleLine}</Text>
-      <Text>{padRight(sessionLine, width) + '│'}</Text>
-      <Text>{padRight(counterLine, width) + '│'}</Text>
-      <Text dimColor>{sep}</Text>
+      <Box justifyContent="space-between" width={width}>
+        <Text bold>claude-trail · live</Text>
+        <Text dimColor>{` filter: ${describeFilter(filter)}`}</Text>
+      </Box>
+      <Text>
+        {session ? `session ${shortId(session)} · uptime ${formatDuration(uptimeSec)}` : 'no active session'}
+      </Text>
+      <Text>
+        {`Reads ${counters.Read}  Edits ${counters.Edit}  Writes ${counters.Write}  Globs ${counters.Glob}  Greps ${counters.Grep}  Tasks ${counters.Task}`}
+      </Text>
+      <Text dimColor>{'─'.repeat(ruleWidth)}</Text>
     </Box>
   );
 };
@@ -57,14 +64,4 @@ function describeFilter(f: FilterState): string {
   const ext = `ext=${f.ext}`;
   const tools = f.tools === 'all' ? 'tools=all' : `tools=${[...f.tools].join(',')}`;
   return `${ext} ${tools}`;
-}
-
-function padRight(s: string, width: number): string {
-  if (s.length >= width) return s.slice(0, width);
-  return s + ' '.repeat(width - s.length);
-}
-
-function pad(prefix: string, width: number, fill: string): string {
-  if (prefix.length >= width) return prefix.slice(0, width);
-  return prefix + fill.repeat(width - prefix.length);
 }
