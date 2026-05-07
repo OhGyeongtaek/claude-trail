@@ -121,6 +121,33 @@ export function isAbsorbed(
   return false;
 }
 
+// — Tool filter presets (issue #2, hotkey `t`) —
+
+/**
+ * Cycle order for the `t` hotkey. First entry is the "no filter" baseline so
+ * the cycle wraps back to `all` after one full pass.
+ * Spec: docs/DESIGN.md §6.
+ */
+export const TOOL_PRESETS: ReadonlyArray<FilterState['tools']> = [
+  'all',
+  new Set<FileToolName | 'Task'>(['Read', 'Edit', 'Write']),
+  new Set<FileToolName | 'Task'>(['Read']),
+  new Set<FileToolName | 'Task'>(['Task']),
+];
+
+export function nextToolPreset(current: FilterState['tools']): FilterState['tools'] {
+  const i = TOOL_PRESETS.findIndex((p) => sameToolPreset(p, current));
+  const next = i < 0 ? 0 : (i + 1) % TOOL_PRESETS.length;
+  return TOOL_PRESETS[next]!;
+}
+
+function sameToolPreset(a: FilterState['tools'], b: FilterState['tools']): boolean {
+  if (a === 'all' || b === 'all') return a === b;
+  if (a.size !== b.size) return false;
+  for (const x of a) if (!b.has(x)) return false;
+  return true;
+}
+
 // — Filters —
 
 export function matchesFilter(e: TrailEvent, f: FilterState): boolean {

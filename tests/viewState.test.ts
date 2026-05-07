@@ -9,6 +9,8 @@ import {
   matchesFilter,
   isAbsorbed,
   topFilesList,
+  nextToolPreset,
+  TOOL_PRESETS,
 } from '../src/ui/viewState.js';
 import type { TrailEvent, FilterState } from '../src/types.js';
 
@@ -237,6 +239,23 @@ test('matchesFilter: control events always pass any filter', () => {
   });
   assert.equal(matchesFilter(e, MD_FILTER), true);
   assert.equal(matchesFilter(e, READ_ONLY_FILTER), true);
+});
+
+// — tool presets (issue #2) —
+
+test('nextToolPreset cycles all → R/E/W → R → Task → all', () => {
+  let cur: typeof TOOL_PRESETS[number] = 'all';
+  const seen: string[] = [];
+  for (let i = 0; i < TOOL_PRESETS.length + 1; i++) {
+    cur = nextToolPreset(cur);
+    seen.push(cur === 'all' ? 'all' : [...cur].sort().join(','));
+  }
+  assert.deepEqual(seen, ['Edit,Read,Write', 'Read', 'Task', 'all', 'Edit,Read,Write']);
+});
+
+test('nextToolPreset: unknown set falls back to first preset', () => {
+  const stranger = new Set<'Glob'>(['Glob']);
+  assert.equal(nextToolPreset(stranger), TOOL_PRESETS[0]);
 });
 
 // — stream cap —

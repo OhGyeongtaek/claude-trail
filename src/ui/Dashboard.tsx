@@ -13,6 +13,7 @@ import { Header } from './Header.js';
 import { Stream } from './Stream.js';
 import { TopFiles } from './TopFiles.js';
 import { startTail, type TailHandle, type TailStats } from '../lib/tail.js';
+import { nextToolPreset } from './viewState.js';
 
 export interface DashboardProps {
   eventsPath: string;
@@ -26,7 +27,8 @@ export interface DashboardProps {
 type Action =
   | { type: 'add'; event: TrailEvent }
   | { type: 'addPrefill'; events: TrailEvent[] }
-  | { type: 'cycleExt' };
+  | { type: 'cycleExt' }
+  | { type: 'cycleTools' };
 
 function reducer(state: ViewState, action: Action): ViewState {
   switch (action.type) {
@@ -41,6 +43,13 @@ function reducer(state: ViewState, action: Action): ViewState {
       const next: FilterState = {
         ...state.filter,
         ext: state.filter.ext === 'all' ? 'md' : 'all',
+      };
+      return { ...state, filter: next };
+    }
+    case 'cycleTools': {
+      const next: FilterState = {
+        ...state.filter,
+        tools: nextToolPreset(state.filter.tools),
       };
       return { ...state, filter: next };
     }
@@ -125,6 +134,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
         exit();
       } else if (input === 'f') {
         dispatch({ type: 'cycleExt' });
+      } else if (input === 't') {
+        dispatch({ type: 'cycleTools' });
       }
     },
     { isActive: !!process.stdin.isTTY },
@@ -193,7 +204,7 @@ const Footer: React.FC<{
   const showStats = errors + parseErrors + oversize > 0;
   return (
     <Box justifyContent="space-between" width={width}>
-      <Text dimColor>q quit · f ext-filter</Text>
+      <Text dimColor>q quit · f ext-filter · t tools</Text>
       {showStats ? (
         <Text dimColor>{`errs:${errors} parse:${parseErrors} drop:${oversize}`}</Text>
       ) : (
