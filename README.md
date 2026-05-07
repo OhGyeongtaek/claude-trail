@@ -1,82 +1,89 @@
 # claude-trail
 
-> Live TUI dashboard that visualizes which files Claude Code reads, edits, and searches.
+> Live TUI dashboard for Claude Code — see what Claude reads, edits, and
+> searches; when context is cleared or compacted; and what each
+> subagent is doing — in real time, in a second terminal.
 
-`claude-trail` answers one simple question:
-**what is Claude actually looking at right now?**
+`claude-trail` answers one question:
+**what is Claude actually doing right now?**
 
-When Claude Code works on a non-trivial task, it reads dozens of files,
-greps the codebase, edits a few, and writes a report. From the user's seat,
-all of this happens behind the scenes. `claude-trail` taps into Claude
-Code's `PostToolUse` hook and renders the file traffic as a live terminal
-dashboard.
+It registers a few [Claude Code hooks](https://docs.claude.com/en/docs/claude-code/hooks),
+appends one JSON line per tool call to `.claude-trail/events.jsonl`, and
+renders the stream as a live Ink TUI.
 
 ```
-┌─ claude-trail · live ─────────── filter: all ──┐
-│ session fcfacf43… · uptime 03:22               │
-│ Reads 32  Edits 4  Writes 1  Globs 2  Greps 7  │
-├────────────────────────────────────────────────┤
-│ Stream                                         │
-│  14:32:18  READ   src/components/Card.jsx      │
-│  14:32:11  GREP   "useState" in src/           │
-│  14:31:55  READ   gatsby-config.js             │
-│  14:31:40  EDIT   src/utils/anim.js            │
-├────────────────────────────────────────────────┤
-│ Top files                                      │
-│  ████████  src/components/Card.jsx       8x    │
-│  █████     gatsby-config.js              5x    │
-│  ███       package.json                  3x    │
-└─ q quit · f filter ────────────────────────────┘
+claude-trail · live                                                 filter: ext=all tools=all
+session 156ec647 · uptime 03:22
+Reads 32  Edits 4  Writes 1  Globs 2  Greps 7  Tasks 2
+─────────────────────────────────────────────────────────────────────────────────────────────
+14:32:18 R READ   src/components/cards/Card.tsx
+14:32:11 g GREP   "useState" in src/
+─── 14:32:00  /compact (auto) ──────────────────────────────────────────────────────────────
+14:31:55 R READ   gatsby-config.js
+14:31:40 T TASK  ⮕ Explore: "Find OAuth handlers"
+14:31:46 R READ   ↳ src/auth/oauth.ts                                                [Explore]
+14:31:51 g GREP   ↳ "callback" in src/auth/                                          [Explore]
+─── 14:31:53  [Explore] done ───────────────────────────────────────────────────────────────
+14:31:52 E EDIT   src/utils/animation/anim.ts
+─────────────────────────────────────────────────────────────────────────────────────────────
+Top files
+████████████  src/components/cards/Card.tsx                                              10x
+██████        gatsby-config.js                                                            5x
+████          src/index.ts                                                                3x
+─────────────────────────────────────────────────────────────────────────────────────────────
+q quit · f ext-filter
 ```
 
-**Status:** v0.1 — work in progress. See [`docs/DESIGN.md`](./docs/DESIGN.md)
-for the design spec.
+**Status:** v0.1 — work in progress. Spec lives in [`docs/DESIGN.md`](./docs/DESIGN.md).
 
 ---
 
-## Features
+## What it captures
 
-- **Live TUI** rendered with [Ink](https://github.com/vadimdemedes/ink). No browser.
-- **Per-tool tracking**: `Read`, `Edit`, `MultiEdit`, `Write`, `NotebookEdit`,
-  `NotebookRead`, `Glob`, `Grep`.
-- **Top files** ASCII bar chart by access frequency.
-- **Filter presets**: all files (default) or markdown only (`--md`).
-- **Live filter toggle**: hotkey `f` cycles modes without restart.
-- **Privacy-first**: paths and metadata only — file *contents* are never recorded.
-- **Project-local log** (`.claude-trail/events.jsonl`) — easy to grep, jq,
-  or feed into other tools.
+- **Tool calls**: `Read`, `Edit`, `Write`, `Glob`, `Grep`, `Task` (subagent invocations).
+- **Context boundaries**: `SessionStart`, `SessionEnd`, `/compact` — rendered as horizontal dividers in the stream.
+- **Subagents**: every `Task` call is shown; tool calls *inside* a subagent are indented and tagged with `[<agent_type>]` for clean attribution.
+
+`Bash`, `WebFetch`, `WebSearch`, `MultiEdit`, `NotebookRead`, `NotebookEdit`,
+and `UserPromptSubmit` are **out of scope for v0.1** (privacy or signal-vs-noise reasons — see [DESIGN.md §11](./docs/DESIGN.md)).
 
 ## Requirements
 
-- Node.js ≥ 18
-- Claude Code (any version supporting `PostToolUse` hooks)
-- An interactive TTY (the `watch` command refuses to run when piped)
+- **Node.js ≥ 18**
+- **Claude Code** with hook support (any recent build)
+- A **TTY** for `watch` and the `init` confirmation prompt (use `--yes` in scripts)
 
-## Install
+## Install (v0.1 — local mode)
 
-> Not yet on npm. The current install path is project-local until v0.3.
+`claude-trail` is not on npm yet. Until v0.3 (global install), run it from a clone:
 
 ```bash
-git clone https://github.com/<you>/claude-trail ~/projects/claude-trail
+git clone https://github.com/OhGyeongtaek/claude-trail.git ~/projects/claude-trail
 cd ~/projects/claude-trail
 npm install
-npm link        # makes `claude-trail` available on PATH
+npm run build
 ```
+
+The build produces `dist/cli.js` and `dist/hook.js`. The `init` command registers a hook command of the form `node $CLAUDE_PROJECT_DIR/dist/hook.js`, so **you need to install claude-trail inside each project you want to observe** (or symlink it). A proper global install is on the v0.3 roadmap.
 
 ## Quick start
 
-In the project you want to observe:
+In any project where you want to observe Claude Code:
 
 ```bash
-# 1. one-time setup — adds a PostToolUse hook to .claude/settings.json
-claude-trail init
+# 1. clone or symlink claude-trail into the project root (see Install above).
 
-# 2. start the dashboard in a second terminal
-claude-trail watch
+# 2. register the 5 hooks in .claude/settings.json
+node /path/to/claude-trail/bin/claude-trail.js init
+
+# 3. start the dashboard in one terminal
+node /path/to/claude-trail/bin/claude-trail.js watch
+
+# 4. start a NEW Claude Code session in another terminal
+claude
 ```
 
-Then use Claude Code as normal in another terminal. Events stream into the
-dashboard in real time.
+> **⚠️ Hooks load at session start.** Any Claude Code session you had open *before* running `init` is still running with the old hook config — its tool calls won't be captured. Restart the session.
 
 ## Commands
 
@@ -86,136 +93,153 @@ Opens the live dashboard.
 
 | Flag | Default | Effect |
 |------|---------|--------|
-| `--all` | ✓ | Show every file |
-| `--md` | | Show only `.md`, `.mdx`, `.markdown` |
-| `--session <id>` | | Filter to a specific Claude session |
-| `--all-sessions` | | Show all sessions interleaved |
+| `--all` | ✓ | Show every file extension |
+| `--md` |   | Only `.md` / `.mdx` / `.markdown` |
+| `--tools <list>` | all | Comma-separated whitelist of tools, e.g. `--tools Read,Edit` (control events always show). Valid: `Read`, `Edit`, `Write`, `Glob`, `Grep`, `Task` |
 
 **Hotkeys**
 
 | Key | Action |
 |-----|--------|
-| `f` | Cycle filter: `all` → `md` → `all` |
+| `f` | Cycle ext filter: `all` ↔ `md` |
 | `q` / `Ctrl+C` | Quit |
+
+The `t` hotkey for live tool-filter cycling, the `c` counter reset, and stream search/scrollback are scheduled for v0.2.
 
 ### `claude-trail init`
 
-Registers a `PostToolUse` hook in the current project's
-`.claude/settings.json`. Safe to run multiple times — existing hooks are
-preserved and only the `claude-trail` entry is added or updated.
+Registers 5 hooks in `<project>/.claude/settings.json`:
 
-The generated hook entry uses `$CLAUDE_PROJECT_DIR` so it survives Claude
-running from any subdirectory:
+| Hook | Matcher |
+|------|---------|
+| `PostToolUse` | `Read\|Edit\|Write\|Glob\|Grep\|Agent` |
+| `SubagentStop` | (none) |
+| `SessionStart` | (none) |
+| `SessionEnd` | (none) |
+| `PreCompact` | (none) |
 
-```json
-{
-  "hooks": {
-    "PostToolUse": [
-      {
-        "matcher": "^(Read|Edit|MultiEdit|Write|NotebookEdit|NotebookRead|Glob|Grep)$",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node \"$CLAUDE_PROJECT_DIR/...\" hook"
-          }
-        ]
-      }
-    ]
-  }
-}
-```
+It shows a diff of planned changes and asks for confirmation. Other tools' hooks in the same file are preserved.
 
-### `claude-trail hook` *(internal)*
+| Flag | Effect |
+|------|--------|
+| `--remove` | Remove only claude-trail's hook entries |
+| `--purge`  | With `--remove`, also delete `.claude-trail/` |
+| `--yes` / `-y` | Skip the y/N prompt (required for non-TTY use) |
 
-The stdin adapter Claude Code calls. You usually don't run this directly.
-Reads one tool-call JSON object from stdin, extracts the path/metadata,
-and appends one line to `.claude-trail/events.jsonl`. Always exits 0,
-never writes to stderr.
+`init` is idempotent: re-running on an already-configured project is a no-op.
+
+### `claude-trail watch` is the only foreground command
+
+The `hook` command exists but is invoked by Claude Code via `bin/claude-trail-hook.js` — you don't run it directly.
 
 ## Event log format
 
-`.claude-trail/events.jsonl` — one JSON object per line:
+`<project>/.claude-trail/events.jsonl` — one JSON object per line. Three discriminated shapes (full schema in [DESIGN.md §5](./docs/DESIGN.md)):
 
-```json
-{
-  "ts": "2026-05-07T05:32:18.421Z",
-  "session": "fcfacf43-...",
-  "tool": "Read",
-  "path": "src/components/Card.jsx",
-  "ext": ".jsx",
-  "meta": { "offset": 0, "limit": 200 }
-}
+```jsonc
+// (a) File tool
+{"ts":"2026-05-07T05:32:18.421Z","session":"156ec647-...","tool":"Read",
+ "path":"src/components/Card.tsx","ext":".tsx",
+ "meta":{"tool_use_id":"toolu_01K5","lines":157,"duration_ms":3}}
+
+// (b) Subagent invocation (Claude Code's internal name `Agent` is normalized to `Task`)
+{"ts":"...","session":"156ec647-...","tool":"Task",
+ "meta":{"tool_use_id":"toolu_01J","subagent_type":"Explore",
+         "description":"Find OAuth handlers","agent_id":"a7d9ed34b488363a3","duration_ms":5135}}
+
+// (c) Control event
+{"ts":"...","session":"156ec647-...","tool":"_control","event":"compact",
+ "meta":{"trigger":"manual"}}
 ```
 
-Because it's plain JSONL, you can analyze sessions with standard tools:
+Plain JSONL, so standard tools just work:
 
 ```bash
 # top 10 most-read files
-jq -r 'select(.tool=="Read") | .path' .claude-trail/events.jsonl | \
-  sort | uniq -c | sort -rn | head
+jq -r 'select(.tool=="Read") | .path' .claude-trail/events.jsonl \
+  | sort | uniq -c | sort -rn | head
 
-# all grep queries Claude ran
+# every grep query
 jq -r 'select(.tool=="Grep") | .meta.query' .claude-trail/events.jsonl
+
+# subagent invocations
+jq 'select(.tool=="Task") | {type:.meta.subagent_type, desc:.meta.description}' \
+  .claude-trail/events.jsonl
 ```
 
 ## Privacy
 
-claude-trail records **paths and metadata only**. It never stores:
+claude-trail records **paths, metadata, and intent only**. It never stores:
 
-- File contents read by `Read`
-- Content written by `Write` (only the byte length)
-- Lines matched by `Grep` (only the query string)
-- Edit diffs (only the file path and a count)
+- File **contents** read by `Read` (only `lines` count)
+- The **body written** by `Write` (only `bytes` count)
+- `Edit`'s `old_string` / `new_string` — only the file path
+- `Grep`'s **matched lines** — only the query and search root (search query *is* preserved as user-intent signal)
+- `Task`'s `prompt` body and the subagent's `last_assistant_message` (potentially sensitive content)
+- `PreCompact`'s `custom_instructions`
 
-The event log lives entirely on your machine in
-`<project>/.claude-trail/events.jsonl`. Nothing is sent over the network.
+The log lives entirely on your machine at `<project>/.claude-trail/events.jsonl`. Nothing is sent over the network.
 
-Add `.claude-trail/` to your `.gitignore` to keep logs out of commits.
+`init` does not modify your `.gitignore` — add `.claude-trail/` yourself if you want to.
 
 ## Architecture
 
 ```
 Claude Code session
-       │ tool call
+       │ tool call / lifecycle event
        ▼
-PostToolUse hook (Claude) ──► claude-trail hook (stdin adapter)
-                                       │
-                                       ▼
-                       .claude-trail/events.jsonl (append)
-                                       │
-                                       ▼
-                            claude-trail watch (Ink TUI)
+5 hooks ─► claude-trail-hook (stdin adapter)
+                  │ append one JSON line
+                  ▼
+       .claude-trail/events.jsonl
+                  │ tail
+                  ▼
+       claude-trail watch (Ink TUI)
 ```
 
-Three components, intentionally decoupled:
+Three deliberately decoupled pieces:
 
-1. **Hook adapter** — tiny, no dependencies. Always exits 0.
-2. **Event store** — append-only JSONL. Standard-tool friendly.
-3. **Viewer** — Ink-based TUI that tails the log.
+1. **Hook adapter** (`dist/hook.js`) — small, no React/Ink imports, ~30 ms cold start. Always exits 0, never blocks Claude.
+2. **Event store** — append-only JSONL. Survives crashes; one bad line doesn't poison the rest.
+3. **Viewer** (`dist/cli.js` + Ink) — separate entry, lazy-loaded only by `watch`.
 
-Full design rationale, alternatives considered, and verification notes:
-- [`docs/DESIGN.md`](./docs/DESIGN.md)
-- [`docs/DESIGN-VERIFICATION.md`](./docs/DESIGN-VERIFICATION.md)
+Full design rationale, M0.5 measurement results, and trade-offs: [`docs/DESIGN.md`](./docs/DESIGN.md).
+
+## Performance
+
+- Hook cold start: **~30 ms** (macOS). Budget: p95 ≤ 100 ms (DESIGN §1.1).
+- `watch` first frame: < 1 s on a 100 MB log.
+- Memory: stream is capped at 200 events; counters stay in a small Map.
+
+## Limitations (v0.1)
+
+- **Hooks are loaded at session start.** Run `init` *before* opening a Claude Code session.
+- **Single active session in TUI.** The log records all sessions; the viewer focuses on the most recent one. Multi-session merge is v0.2.
+- **No global install yet** — the `init` command writes a project-relative hook path. v0.3 ships `claude-trail-hook` as a global binary.
+- **No matcher enforcement assumption.** Some `claude -p` headless invocations fire PostToolUse for tools outside our matcher; the hook adapter has its own whitelist as a safety net.
+- **Subagent attribution requires Claude Code's `agent_id` field** (verified in M0.5). If a future Claude Code release changes the field name, attribution falls back to plain stream output until a new release ships.
 
 ## Roadmap
 
 | Version | Scope |
 |---------|-------|
-| v0.1 | `watch` (live), `init`, `hook`, `--md`/`--all` filter |
-| v0.2 | `replay <session>`, custom `--ext` list, per-tool filters |
-| v0.3 | Global npm install, daemon mode (avoid Node startup overhead) |
-| v0.4 | HTML export, session diffing |
-| v1.0 | Stable API, npm release |
+| **v0.1** (current) | live `watch`, `init` / `init --remove`, file events, subagent attribution, `/compact` lifecycle |
+| v0.2 | multi-session merge with FNV color coding, `t` hotkey for tool filter, stream search & scrollback, `replay <session>`, `--ext` custom list |
+| v0.3 | global `npm i -g`, opt-in Bash matcher, daily log rotation, post-hoc redaction tool |
+| v0.4 | static HTML export, session diff, "files alive in current context" snapshot |
+| v1.0 | npm release, native (Go/Rust) hook for sub-millisecond cold start |
 
 ## Contributing
 
-Issues and PRs welcome. Before opening a feature PR, check
-[`docs/DESIGN.md` §12 (Roadmap)](./docs/DESIGN.md) and
-[`docs/DESIGN-VERIFICATION.md` §E (Watch List)](./docs/DESIGN-VERIFICATION.md)
-to see whether the idea is already on the map.
+PRs welcome. Before non-trivial work, open an issue or check
+[`docs/DESIGN.md` §17 (Milestones)](./docs/DESIGN.md) and §18 (open questions) so we can avoid duplicate effort.
 
-For non-trivial design changes, open an issue first so we can discuss
-the approach before code.
+Run the tests:
+
+```bash
+npm test            # node --test + tsx, ~90 unit tests
+npm run build       # tsc strict
+```
 
 ## License
 
