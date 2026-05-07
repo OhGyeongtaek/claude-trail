@@ -1,0 +1,55 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Read|Edit|Write|Glob|Grep|Task",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "env CLAUDE_TRAIL_CAPTURE_DIR=$CLAUDE_PROJECT_DIR/.claude-trail/capture node $CLAUDE_PROJECT_DIR/dist/hook.js"
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "env CLAUDE_TRAIL_CAPTURE_DIR=$CLAUDE_PROJECT_DIR/.claude-trail/capture node $CLAUDE_PROJECT_DIR/dist/hook.js"
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "env CLAUDE_TRAIL_CAPTURE_DIR=$CLAUDE_PROJECT_DIR/.claude-trail/capture node $CLAUDE_PROJECT_DIR/dist/hook.js"
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "env CLAUDE_TRAIL_CAPTURE_DIR=$CLAUDE_PROJECT_DIR/.claude-trail/capture node $CLAUDE_PROJECT_DIR/dist/hook.js"
+          }
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "env CLAUDE_TRAIL_CAPTURE_DIR=$CLAUDE_PROJECT_DIR/.claude-trail/capture node $CLAUDE_PROJECT_DIR/dist/hook.js"
+          }
+        ]
+      }
+    ]
+  }
+}

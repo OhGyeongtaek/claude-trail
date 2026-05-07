@@ -1,0 +1,45 @@
+{
+  "name": "claude-trail",
+  "version": "0.1.0-dev.0",
+  "description": "Real-time TUI dashboard for Claude Code: visualize file interactions, context boundaries (/clear, /compact), and subagent activity.",
+  "type": "module",
+  "bin": {
+    "claude-trail": "bin/claude-trail.js",
+    "claude-trail-hook": "bin/claude-trail-hook.js"
+  },
+  "files": [
+    "bin",
+    "dist",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "clean": "rm -rf dist",
+    "test": "node --import tsx --test tests/*.test.ts",
+    "prepublishOnly": "npm run clean && npm run build"
+  },
+  "dependencies": {
+    "ink": "^5.0.1",
+    "react": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "@types/react": "^18.3.3",
+    "ink-testing-library": "^4.0.0",
+    "tsx": "^4.21.0",
+    "typescript": "^5.5.4"
+  },
+  "keywords": [
+    "claude",
+    "claude-code",
+    "tui",
+    "ink",
+    "observability",
+    "hooks"
+  ],
+  "license": "MIT"
+}
