@@ -1,5 +1,7 @@
 # claude-trail
 
+**Languages:** [English](./README.md) · [한국어](./README.ko.md) · [日本語](./README.ja.md)
+
 > Live TUI dashboard for Claude Code — see what Claude reads, edits, and
 > searches; when context is cleared or compacted; and what each
 > subagent is doing — in real time, in a second terminal.
@@ -44,18 +46,19 @@ q quit · f ext · t tools · / search · ↑/PgUp scroll · Esc resume
 
 ## What it captures
 
-- **Tool calls**: `Read`, `Edit`, `Write`, `Glob`, `Grep`, `Task` (subagent invocations).
-- **Context boundaries**: `SessionStart`, `SessionEnd`, `/compact` — rendered as horizontal dividers in the stream.
-- **Subagents**: every `Task` call is shown; tool calls *inside* a subagent are indented and tagged with `[<agent_type>]` for clean attribution.
+The dashboard shows:
 
-`Bash`, `WebFetch`, `WebSearch`, `MultiEdit`, `NotebookRead`, `NotebookEdit`,
-and `UserPromptSubmit` are **out of scope** (privacy or signal-vs-noise reasons — see [DESIGN.md §11](./docs/DESIGN.md)).
+- **Tool calls**: `Read`, `Edit`, `Write`, `Glob`, `Grep`, `Task` (subagent invocations)
+- **Context boundaries**: `SessionStart`, `SessionEnd`, `/compact` — rendered as horizontal dividers in the stream
+- **Subagent tools**: tool calls *inside* a subagent are indented and tagged with `[<agent_type>]` for clean attribution
+
+`Bash`, `WebFetch`, `WebSearch`, `MultiEdit`, `NotebookRead`, `NotebookEdit`, and `UserPromptSubmit` are intentionally excluded for privacy or signal-vs-noise reasons (see [DESIGN.md §11](./docs/DESIGN.md)).
 
 ## Requirements
 
 - **Node.js ≥ 18**
 - **Claude Code** with hook support (any recent build)
-- A **TTY** for `watch` and the `init` confirmation prompt (use `--yes` in scripts)
+- A **TTY** (terminal) for interactive `watch` mode and the `init` confirmation prompt (use `--yes` in scripts to bypass)
 
 ## Install (local mode)
 
@@ -75,15 +78,15 @@ The build produces `dist/cli.js` and `dist/hook.js`. The `init` command register
 In any project where you want to observe Claude Code:
 
 ```bash
-# 1. clone or symlink claude-trail into the project root (see Install above).
+# 1. Clone or symlink claude-trail into the project root (see Install above).
 
-# 2. register the 5 hooks in .claude/settings.json
+# 2. Register the 5 hooks in .claude/settings.json.
 node /path/to/claude-trail/bin/claude-trail.js init
 
-# 3. start the dashboard in one terminal
+# 3. Start the dashboard in one terminal.
 node /path/to/claude-trail/bin/claude-trail.js watch
 
-# 4. start a NEW Claude Code session in another terminal
+# 4. Start a new Claude Code session in another terminal.
 claude
 ```
 
@@ -93,13 +96,13 @@ claude
 
 ### `claude-trail watch`
 
-Opens the live dashboard.
+Opens the live TUI dashboard in the terminal.
 
 | Flag | Default | Effect |
 |------|---------|--------|
 | `--all` | ✓ | Show every file extension |
 | `--md` |   | Only `.md` / `.mdx` / `.markdown` |
-| `--ext <list>` |   | Explicit comma-separated extension whitelist, e.g. `--ext .ts,.tsx,.md`. Each entry must start with `.`; takes precedence over `--md` |
+| `--ext <list>` |   | Explicit comma-separated extension whitelist, e.g. `--ext .ts,.tsx,.md` (each entry must start with `.`); takes precedence over `--md` |
 | `--tools <list>` | all | Comma-separated whitelist of tools, e.g. `--tools Read,Edit` (control events always show). Valid: `Read`, `Edit`, `Write`, `Glob`, `Grep`, `Task` |
 | `--since <duration>` |   | Drop prefill events older than the cutoff. Format `<N><unit>` where unit is `s`, `m`, `h`, or `d`. Example: `--since 30m` |
 
@@ -116,9 +119,9 @@ Opens the live dashboard.
 
 ### `claude-trail replay <session_id>`
 
-Plays a finished session back from `events.jsonl` in a non-live walkthrough.
-Useful for reviewing what Claude did after the fact without touching the
-live watcher.
+Replays a finished session from `events.jsonl` in a non-interactive walkthrough.
+Useful for reviewing what Claude did after the session ended, without needing the
+live watcher to remain active.
 
 | Flag | Effect |
 |------|--------|
@@ -145,11 +148,11 @@ with `no events found`.
 
 ### `claude-trail init`
 
-Registers 5 hooks in `<project>/.claude/settings.json`:
+Registers 5 hooks to `.claude/settings.json`:
 
 | Hook | Matcher |
 |------|---------|
-| `PostToolUse` | `Read\|Edit\|Write\|Glob\|Grep\|Agent` |
+| `PostToolUse` | `Read|Edit|Write|Glob|Grep|Agent` |
 | `SubagentStop` | (none) |
 | `SessionStart` | (none) |
 | `SessionEnd` | (none) |
@@ -165,9 +168,9 @@ It shows a diff of planned changes and asks for confirmation. Other tools' hooks
 
 `init` is idempotent: re-running on an already-configured project is a no-op.
 
-### `claude-trail watch` is the only foreground command
+### How hooks are invoked
 
-The `hook` command exists but is invoked by Claude Code via `bin/claude-trail-hook.js` — you don't run it directly.
+The `hook` command (internal) is invoked by Claude Code via the hooks system in `.claude/settings.json` — you don't run it directly. It's registered during `init` as a command referencing `bin/claude-trail-hook.js`.
 
 ## Event log format
 
@@ -251,13 +254,11 @@ Full design rationale, M0.5 measurement results, and trade-offs: [`docs/DESIGN.m
 
 ## Limitations
 
-- **Hooks are loaded at session start.** Run `init` *before* opening a Claude Code session.
-- **Aggregate counters across sessions.** The header counters (Reads / Edits /
-  Writes / …) sum across all visible sessions. Per-session counters are a
-  v0.3 candidate.
-- **No global install yet** — the `init` command writes a project-relative hook path. v0.3 ships `claude-trail-hook` as a global binary.
-- **No matcher enforcement assumption.** Some `claude -p` headless invocations fire PostToolUse for tools outside our matcher; the hook adapter has its own whitelist as a safety net.
-- **Subagent attribution requires Claude Code's `agent_id` field** (verified in M0.5). If a future Claude Code release changes the field name, attribution falls back to plain stream output until a new release ships.
+- **Hooks load at session start** — `init` must run before opening Claude Code. Existing sessions will not be captured.
+- **Counters aggregate across sessions** — header totals (Reads / Edits / Writes / …) sum all visible sessions. Per-session counters are planned for v0.3.
+- **Project-scoped installation only** — `init` writes a hook path relative to the project. Global install as a binary is planned for v0.3.
+- **Tool matcher gaps** — some headless `claude -p` invocations fire PostToolUse for tools outside the declared matcher; the hook adapter has its own whitelist as safety.
+- **Subagent attribution relies on `agent_id`** — verified as stable in M0.5. If a future Claude Code release changes this field, attribution falls back to plain stream output until we release a fix.
 
 ## Roadmap
 
