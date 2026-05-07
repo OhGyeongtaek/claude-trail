@@ -10,7 +10,7 @@ import {
   type HookEntry,
 } from '../src/lib/installer.js';
 
-const OUR_CMD = 'node $CLAUDE_PROJECT_DIR/dist/hook.js';
+const OUR_CMD = 'claude-trail-hook';
 
 // — fingerprint detection —
 
@@ -176,7 +176,7 @@ test('planRemove: leaves non-hooks settings keys untouched', () => {
     permissions: { allow: ['Skill(foo)'] },
     hooks: {
       SessionStart: [
-        { hooks: [{ type: 'command', command: 'node $CLAUDE_PROJECT_DIR/dist/hook.js' }] },
+        { hooks: [{ type: 'command', command: 'claude-trail-hook' }] },
       ],
     },
   };
@@ -243,12 +243,11 @@ test('parseInitArgs: --yes equivalent to -y', () => {
 });
 
 // — Sanity helper to ensure HookEntry typing — narrow check on roundtrip
-test('install: PostToolUse hook command matches expected env-driven path', () => {
+test('install: PostToolUse hook command is the global binary', () => {
   const r = planInstall(null);
   const cmd = r.settings.hooks!.PostToolUse![0]!.hooks[0]!.command;
   assert.equal(cmd, OUR_CMD);
-  // Future-proof: nobody silently bakes in an absolute machine path.
-  assert.ok(cmd.includes('$CLAUDE_PROJECT_DIR'));
+  assert.equal(cmd, 'claude-trail-hook');
   // Make TS happy on `HookEntry` import being used at compile time.
   const _typed: HookEntry = r.settings.hooks!.PostToolUse![0]!;
   assert.ok(_typed);

@@ -40,7 +40,7 @@ q quit · f ext · t tools · / search · ↑/PgUp scroll · Esc resume
 > The `[xxxx]` tag and per-session uptime line only appear when ≥2 sessions
 > are visible. Single-session view stays clean.
 
-**Status:** v0.2 — see roadmap below. Spec lives in [`docs/DESIGN.md`](./docs/DESIGN.md).
+**Status:** v0.3 — global install via npm. See [`ROADMAP.md`](./ROADMAP.md) for the version-by-version scope. Spec lives in [`docs/DESIGN.md`](./docs/DESIGN.md).
 
 ---
 
@@ -60,33 +60,44 @@ The dashboard shows:
 - **Claude Code** with hook support (any recent build)
 - A **TTY** (terminal) for interactive `watch` mode and the `init` confirmation prompt (use `--yes` in scripts to bypass)
 
-## Install (local mode)
+## Install
 
-`claude-trail` is not on npm yet. Until v0.3 (global install), run it from a clone:
+Install once, globally, from npm:
 
 ```bash
-git clone https://github.com/OhGyeongtaek/claude-trail.git ~/projects/claude-trail
-cd ~/projects/claude-trail
-npm install
-npm run build
+npm install -g claude-trail
 ```
 
-The build produces `dist/cli.js` and `dist/hook.js`. The `init` command registers a hook command of the form `node $CLAUDE_PROJECT_DIR/dist/hook.js`, so **you need to install claude-trail inside each project you want to observe** (or symlink it). A proper global install is on the v0.3 roadmap.
+This adds two binaries to your `PATH`:
+- `claude-trail` — the CLI (`watch` / `replay` / `init`)
+- `claude-trail-hook` — the hook adapter that Claude Code invokes (you don't run this directly)
+
+### Install from source
+
+If you want to hack on it, clone and link:
+
+```bash
+git clone https://github.com/OhGyeongtaek/claude-trail.git
+cd claude-trail
+npm install
+npm run build
+npm link    # makes `claude-trail` and `claude-trail-hook` available globally
+```
+
+Use `npm unlink -g claude-trail` to remove the link.
 
 ## Quick start
 
 In any project where you want to observe Claude Code:
 
 ```bash
-# 1. Clone or symlink claude-trail into the project root (see Install above).
+# 1. Register the 5 hooks in .claude/settings.json.
+claude-trail init
 
-# 2. Register the 5 hooks in .claude/settings.json.
-node /path/to/claude-trail/bin/claude-trail.js init
+# 2. Start the dashboard in one terminal.
+claude-trail watch
 
-# 3. Start the dashboard in one terminal.
-node /path/to/claude-trail/bin/claude-trail.js watch
-
-# 4. Start a new Claude Code session in another terminal.
+# 3. Start a new Claude Code session in another terminal.
 claude
 ```
 
@@ -140,7 +151,7 @@ live watcher to remain active.
 ```bash
 # Find a recent session id and replay it
 SID=$(tail -n 200 .claude-trail/events.jsonl | jq -r .session | sort -u | head -1)
-node /path/to/claude-trail/bin/claude-trail.js replay "$SID"
+claude-trail replay "$SID"
 ```
 
 Non-TTY invocations exit with `requires a TTY`. Unknown session ids exit
@@ -239,7 +250,7 @@ Claude Code session
 
 Three deliberately decoupled pieces:
 
-1. **Hook adapter** (`dist/hook.js`) — small, no React/Ink imports, ~30 ms cold start. Always exits 0, never blocks Claude.
+1. **Hook adapter** (`claude-trail-hook` binary, `dist/hook.js`) — small, no React/Ink imports, ~30 ms cold start. Always exits 0, never blocks Claude.
 2. **Event store** — append-only JSONL. Survives crashes; one bad line doesn't poison the rest.
 3. **Viewer** (`dist/cli.js` + Ink) — separate entry, lazy-loaded only by `watch`.
 
@@ -256,19 +267,12 @@ Full design rationale, M0.5 measurement results, and trade-offs: [`docs/DESIGN.m
 
 - **Hooks load at session start** — `init` must run before opening Claude Code. Existing sessions will not be captured.
 - **Counters aggregate across sessions** — header totals (Reads / Edits / Writes / …) sum all visible sessions. Per-session counters are planned for v0.3.
-- **Project-scoped installation only** — `init` writes a hook path relative to the project. Global install as a binary is planned for v0.3.
 - **Tool matcher gaps** — some headless `claude -p` invocations fire PostToolUse for tools outside the declared matcher; the hook adapter has its own whitelist as safety.
 - **Subagent attribution relies on `agent_id`** — verified as stable in M0.5. If a future Claude Code release changes this field, attribution falls back to plain stream output until we release a fix.
 
 ## Roadmap
 
-| Version | Scope |
-|---------|-------|
-| v0.1 | live `watch`, `init` / `init --remove`, file events, subagent attribution, `/compact` lifecycle |
-| **v0.2** (current) | ✅ multi-session merge with FNV-1a color coding, ✅ `t` hotkey for tool filter, ✅ stream search (`/`) + scrollback (`↑`/`↓`/`PgUp`/`PgDn`), ✅ `replay <session>`, ✅ `--ext` custom list, ✅ `--since <duration>` |
-| v0.3 | global `npm i -g`, opt-in Bash matcher, daily log rotation, post-hoc redaction tool, per-session counters, `c` counter reset, `space` pause hotkey for `watch` |
-| v0.4 | static HTML export, session diff, "files alive in current context" snapshot |
-| v1.0 | npm release, native (Go/Rust) hook for sub-millisecond cold start |
+See [`ROADMAP.md`](./ROADMAP.md) for the version-by-version scope.
 
 ## Contributing
 

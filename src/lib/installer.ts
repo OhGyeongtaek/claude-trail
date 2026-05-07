@@ -4,7 +4,7 @@
 // All operations are pure on the JSON object — read/write happens in
 // commands/init.ts. This module is unit-testable without filesystem.
 
-const HOOK_COMMAND = 'node $CLAUDE_PROJECT_DIR/dist/hook.js';
+const HOOK_COMMAND = 'claude-trail-hook';
 const POST_TOOL_USE_MATCHER = 'Read|Edit|Write|Glob|Grep|Agent';
 
 const HOOK_EVENTS = [

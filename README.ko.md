@@ -35,7 +35,7 @@ q quit · f ext · t tools · / search · ↑/PgUp scroll · Esc resume
 
 > `[xxxx]` 태그와 세션별 가동시간 라인은 2개 이상의 세션이 표시될 때만 나타납니다. 단일 세션 뷰는 간결하게 유지됩니다.
 
-**상태:** v0.2 — 로드맵은 아래를 참고하세요. 명세는 [`docs/DESIGN.md`](./docs/DESIGN.md)에 있습니다.
+**상태:** v0.3 — npm으로 글로벌 설치. 버전별 범위는 [`ROADMAP.md`](./ROADMAP.md) 참고. 명세는 [`docs/DESIGN.md`](./docs/DESIGN.md)에 있습니다.
 
 ---
 
@@ -54,33 +54,44 @@ q quit · f ext · t tools · / search · ↑/PgUp scroll · Esc resume
 - **Claude Code** (후크 지원이 있는 최근 빌드)
 - `watch`와 `init` 확인 프롬프트를 위한 **TTY** (스크립트에서는 `--yes` 사용)
 
-## 설치 (로컬 모드)
+## 설치
 
-`claude-trail`은 아직 npm에 없습니다. v0.3 (전역 설치)까지는 클론에서 실행하세요:
+npm에서 한 번 전역 설치:
 
 ```bash
-git clone https://github.com/OhGyeongtaek/claude-trail.git ~/projects/claude-trail
-cd ~/projects/claude-trail
-npm install
-npm run build
+npm install -g claude-trail
 ```
 
-빌드 결과 `dist/cli.js`와 `dist/hook.js`가 생성됩니다. `init` 명령은 `node $CLAUDE_PROJECT_DIR/dist/hook.js` 형태의 후크 명령을 등록하므로 **Claude Code를 관찰하려는 각 프로젝트 내에 claude-trail을 설치해야 합니다** (또는 심링크). 적절한 전역 설치는 v0.3 로드맵에 있습니다.
+`PATH`에 두 바이너리가 추가됩니다:
+- `claude-trail` — CLI (`watch` / `replay` / `init`)
+- `claude-trail-hook` — 후크 어댑터 (Claude Code가 호출하는 것; 직접 실행할 필요 없음)
+
+### 소스에서 설치
+
+직접 개발하려면 클론해서 링크:
+
+```bash
+git clone https://github.com/OhGyeongtaek/claude-trail.git
+cd claude-trail
+npm install
+npm run build
+npm link    # `claude-trail`과 `claude-trail-hook`을 글로벌에서 사용 가능하게 함
+```
+
+링크를 제거하려면 `npm unlink -g claude-trail`을 사용합니다.
 
 ## 빠른 시작
 
 Claude Code를 관찰하려는 모든 프로젝트에서:
 
 ```bash
-# 1. 프로젝트 루트에 claude-trail을 클론하거나 심링크합니다 (위의 설치 참고).
+# 1. .claude/settings.json에 5개 후크를 등록합니다
+claude-trail init
 
-# 2. .claude/settings.json에 5개 후크를 등록합니다
-node /path/to/claude-trail/bin/claude-trail.js init
+# 2. 한 터미널에서 대시보드를 시작합니다
+claude-trail watch
 
-# 3. 한 터미널에서 대시보드를 시작합니다
-node /path/to/claude-trail/bin/claude-trail.js watch
-
-# 4. 다른 터미널에서 새로운 Claude Code 세션을 시작합니다
+# 3. 다른 터미널에서 새로운 Claude Code 세션을 시작합니다
 claude
 ```
 
@@ -133,7 +144,7 @@ claude
 ```bash
 # 최근 세션 id를 찾아 재생합니다
 SID=$(tail -n 200 .claude-trail/events.jsonl | jq -r .session | sort -u | head -1)
-node /path/to/claude-trail/bin/claude-trail.js replay "$SID"
+claude-trail replay "$SID"
 ```
 
 TTY가 아닌 호출은 `requires a TTY`로 종료됩니다. 알 수 없는 세션 id는 `no events found`로 종료됩니다.
@@ -231,7 +242,7 @@ Claude Code 세션
 
 의도적으로 분리된 3가지 컴포넌트:
 
-1. **후크 어댑터** (`dist/hook.js`) — 작음, React/Ink 임포트 없음, ~30 ms 콜드 스타트. 항상 종료 코드 0, Claude를 차단하지 않습니다.
+1. **후크 어댑터** (`claude-trail-hook` 바이너리, `dist/hook.js`) — 작음, React/Ink 임포트 없음, ~30 ms 콜드 스타트. 항상 종료 코드 0, Claude를 차단하지 않습니다.
 2. **이벤트 저장소** — 추가 전용 JSONL. 충돌로부터 살아남으며, 하나의 잘못된 라인도 나머지를 손상시키지 않습니다.
 3. **뷰어** (`dist/cli.js` + Ink) — 별도의 진입점이며, `watch`에서만 지연 로드됩니다.
 
@@ -247,19 +258,12 @@ Claude Code 세션
 
 - **후크는 세션 시작 시 로드됨** — `init`은 Claude Code를 열기 전에 실행해야 합니다. 기존 세션은 캡처되지 않습니다.
 - **카운터는 세션 간에 집계됨** — 헤더 합계 (Reads / Edits / Writes / …)는 모든 표시된 세션의 합입니다. 세션별 카운터는 v0.3 계획입니다.
-- **프로젝트 범위 설치만 가능** — `init`은 프로젝트 상대 후크 경로를 씁니다. 전역 설치는 v0.3 계획입니다.
 - **도구 매처 격차** — 일부 헤드리스 `claude -p` 호출은 선언된 매처 범위 밖의 도구에서 PostToolUse를 발화할 수 있습니다. 후크 어댑터는 안전망으로 자체 화이트리스트를 포함합니다.
 - **서브에이전트 귀속은 `agent_id` 필드에 의존** — M0.5에서 검증됨. 향후 Claude Code 릴리스가 이 필드를 변경하면, 귀속은 수정이 출시될 때까지 평문 스트림 출력으로 폴백됩니다.
 
 ## 로드맵
 
-| 버전 | 범위 |
-|---------|-------|
-| v0.1 | live `watch`, `init` / `init --remove`, 파일 이벤트, 서브에이전트 귀속, `/compact` 라이프사이클 |
-| **v0.2** (현재) | ✅ FNV-1a 색상 코딩을 사용한 다중 세션 병합, ✅ 도구 필터용 `t` 핫키, ✅ 스트림 검색 (`/`) + 스크롤백 (`↑`/`↓`/`PgUp`/`PgDn`), ✅ `replay <session>`, ✅ `--ext` 커스텀 리스트, ✅ `--since <duration>` |
-| v0.3 | 전역 `npm i -g`, 옵트인 Bash 매처, 일일 로그 로테이션, 사후 편집 도구, 세션별 카운터, `c` 카운터 리셋, `watch`용 `space` 일시 중지 핫키 |
-| v0.4 | 정적 HTML 내보내기, 세션 비교, "현재 컨텍스트에서 살아있는 파일" 스냅샷 |
-| v1.0 | npm 릴리스, 네이티브 (Go/Rust) 후크로 서브 밀리초 콜드 스타트 |
+버전별 범위는 [`ROADMAP.md`](./ROADMAP.md) 참고.
 
 ## 기여
 

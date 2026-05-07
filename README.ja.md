@@ -35,7 +35,7 @@ q quit · f ext · t tools · / search · ↑/PgUp scroll · Esc resume
 
 > `[xxxx]` タグとセッションごとのアップタイム行は、2つ以上のセッションが表示されている場合にのみ表示される。シングルセッションビューはクリーンなままである。
 
-**ステータス：** v0.2 — 以下のロードマップを参照する。仕様は [`docs/DESIGN.md`](./docs/DESIGN.md) にある。
+**ステータス：** v0.3 — npm 経由でグローバルインストール可能である。バージョンごとのスコープは [`ROADMAP.md`](./ROADMAP.md) を参照。仕様は [`docs/DESIGN.md`](./docs/DESIGN.md) にある。
 
 ---
 
@@ -55,33 +55,44 @@ q quit · f ext · t tools · / search · ↑/PgUp scroll · Esc resume
 - **Claude Code** フック対応（任意の最新ビルド）
 - `watch` と `init` 確認プロンプト用の **TTY**（スクリプトでは `--yes` を使用してください）
 
-## インストール（ローカルモード）
+## インストール
 
-`claude-trail` はまだ npm に公開されていない。v0.3（グローバルインストール）まで、クローンから実行する：
+npm からグローバルにインストールする：
 
 ```bash
-git clone https://github.com/OhGyeongtaek/claude-trail.git ~/projects/claude-trail
-cd ~/projects/claude-trail
-npm install
-npm run build
+npm install -g claude-trail
 ```
 
-ビルドは `dist/cli.js` と `dist/hook.js` を生成する。`init` コマンドは `node $CLAUDE_PROJECT_DIR/dist/hook.js` 形式のフックコマンドを登録するため、**観察したい各プロジェクト内に claude-trail をインストール**（またはシンボリックリンク）する必要がある。適切なグローバルインストールは v0.3 ロードマップに登録されている。
+2つのバイナリが `PATH` に追加される：
+- `claude-trail` — CLI（`watch` / `replay` / `init`）
+- `claude-trail-hook` — Claude Code が呼び出すフックアダプター（直接実行する必要はない）
+
+### ソースからインストール
+
+開発に従事する場合は、クローンしてリンクする：
+
+```bash
+git clone https://github.com/OhGyeongtaek/claude-trail.git
+cd claude-trail
+npm install
+npm run build
+npm link    # `claude-trail` と `claude-trail-hook` をグローバルで利用可能にする
+```
+
+リンクを削除するには `npm unlink -g claude-trail` を使用する。
 
 ## クイックスタート
 
 Claude Code を観察したい任意のプロジェクトで以下を実行する：
 
 ```bash
-# 1. claude-trail をプロジェクトルートにクローンまたはシンボリックリンク（上記のインストールを参照）。
+# 1. .claude/settings.json に5つのフックを登録する。
+claude-trail init
 
-# 2. .claude/settings.json に5つのフックを登録
-node /path/to/claude-trail/bin/claude-trail.js init
+# 2. 1つのターミナルでダッシュボードを開始する。
+claude-trail watch
 
-# 3. 1つのターミナルでダッシュボードを開始
-node /path/to/claude-trail/bin/claude-trail.js watch
-
-# 4. 別のターミナルで新しい Claude Code セッションを開始
+# 3. 別のターミナルで新しい Claude Code セッションを開始する。
 claude
 ```
 
@@ -134,7 +145,7 @@ claude
 ```bash
 # 最近のセッション ID を見つけて再生
 SID=$(tail -n 200 .claude-trail/events.jsonl | jq -r .session | sort -u | head -1)
-node /path/to/claude-trail/bin/claude-trail.js replay "$SID"
+claude-trail replay "$SID"
 ```
 
 非 TTY 呼び出しは `requires a TTY` で終了し、不明なセッション ID は `no events found` で終了する。
@@ -232,7 +243,7 @@ Claude Code session
 
 意図的に3つの疎結合な部品：
 
-1. **フックアダプター**（`dist/hook.js`）— 小さく、React/Ink インポートなし、約 30 ms コールドスタート。常に 0 で終了し、Claude をブロックしない
+1. **フックアダプター**（`claude-trail-hook` バイナリ、`dist/hook.js`）— 小さく、React/Ink インポートなし、約 30 ms コールドスタート。常に 0 で終了し、Claude をブロックしない
 2. **イベントストア** — 追記専用 JSONL。クラッシュからの復旧が可能。1つの不正な行が他を汚染しない
 3. **ビューアー**（`dist/cli.js` + Ink）— 別エントリ、`watch` でのみ遅延ロード
 
@@ -246,21 +257,14 @@ Claude Code session
 
 ## 制限事項
 
-- **フックはセッション開始時に読み込まれる。** Claude Code セッションを開く *前に* `init` を実行する。
-- **セッション間で集計カウンター。** ヘッダーカウンター（Reads / Edits / Writes / …）は表示されているすべてのセッションで集計される。セッションごとのカウンターは v0.3 の候補である
-- **グローバルインストールなし** — `init` コマンドはプロジェクト相対フックパスを書き込む。v0.3 は `claude-trail-hook` をグローバルバイナリとして配信する
-- **マッチャー実装の仮定なし。** 一部の `claude -p` ヘッドレス呼び出しはマッチャー外のツール用に PostToolUse を発火させる。フックアダプターは安全ネットとして独自のホワイトリストを持つ
-- **サブエージェント帰属関係には Claude Code の `agent_id` フィールドが必要**（M0.5 で検証）。将来の Claude Code リリースがフィールド名を変更する場合、帰属関係は新しいリリースが配信されるまで、プレーンストリーム出力にフォールバックする
+- **フックはセッション開始時に読み込まれる。** Claude Code セッションを開く *前に* `init` を実行する。セッション開始後の変更は反映されない。
+- **セッション間で集計カウンター。** ヘッダーカウンター（Reads / Edits / Writes / …）は表示されているすべてのセッションで集計される。セッションごとのカウンターは将来のバージョンで計画されている。
+- **ツール マッチャーのギャップ。** 一部の `claude -p` ヘッドレス呼び出しはマッチャー外のツール用に PostToolUse を発火させる。フックアダプターは安全ネットとして独自のホワイトリストを持つ。
+- **サブエージェント帰属関係は `agent_id` に依存。** M0.5 で安定性を確認済み。将来の Claude Code リリースがこのフィールドを変更した場合、帰属関係は修正をリリースするまでプレーンストリーム出力にフォールバックする。
 
 ## ロードマップ
 
-| バージョン | スコープ |
-|---------|-------|
-| v0.1 | ライブ `watch`、`init`/`init --remove`、ファイルイベント、サブエージェント帰属関係、`/compact` ライフサイクル |
-| **v0.2**（現在） | ✅ FNV-1a カラーコーディング付きマルチセッションマージ、✅ ツールフィルター用 `t` ホットキー、✅ ストリーム検索（`/`）+ スクロールバック（`↑`/`↓`/`PgUp`/`PgDn`）、✅ `replay <session>`、✅ `--ext` カスタムリスト、✅ `--since <duration>` |
-| v0.3 | グローバル `npm i -g`、オプトイン Bash マッチャー、日次ログローテーション、事後削除ツール、セッションごとのカウンター、`c` カウンターリセット、`watch` 用 `space` 一時停止ホットキー |
-| v0.4 | 静的 HTML エクスポート、セッション差分、「現在のコンテキストに保存されているファイル」スナップショット |
-| v1.0 | npm リリース、ネイティブ（Go/Rust）フック（サブミリ秒コールドスタート） |
+バージョンごとのスコープは [`ROADMAP.md`](./ROADMAP.md) を参照。
 
 ## コントリビュート
 
