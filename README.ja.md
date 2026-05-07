@@ -60,7 +60,7 @@ q quit · f ext · t tools · / search · ↑/PgUp scroll · Esc resume
 npm からグローバルにインストールする：
 
 ```bash
-npm install -g claude-trail
+npm install -g @ohgyeongtaek/claude-trail
 ```
 
 2つのバイナリが `PATH` に追加される：
@@ -79,7 +79,7 @@ npm run build
 npm link    # `claude-trail` と `claude-trail-hook` をグローバルで利用可能にする
 ```
 
-リンクを削除するには `npm unlink -g claude-trail` を使用する。
+リンクを削除するには `npm unlink -g @ohgyeongtaek/claude-trail` を使用する。
 
 ## クイックスタート
 

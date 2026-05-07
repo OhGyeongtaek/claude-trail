@@ -65,7 +65,7 @@ The dashboard shows:
 Install once, globally, from npm:
 
 ```bash
-npm install -g claude-trail
+npm install -g @ohgyeongtaek/claude-trail
 ```
 
 This adds two binaries to your `PATH`:
@@ -84,7 +84,7 @@ npm run build
 npm link    # makes `claude-trail` and `claude-trail-hook` available globally
 ```
 
-Use `npm unlink -g claude-trail` to remove the link.
+Use `npm unlink -g @ohgyeongtaek/claude-trail` to remove the link.
 
 ## Quick start
 

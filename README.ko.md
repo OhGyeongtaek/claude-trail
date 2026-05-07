@@ -59,7 +59,7 @@ q quit · f ext · t tools · / search · ↑/PgUp scroll · Esc resume
 npm에서 한 번 전역 설치:
 
 ```bash
-npm install -g claude-trail
+npm install -g @ohgyeongtaek/claude-trail
 ```
 
 `PATH`에 두 바이너리가 추가됩니다:
@@ -78,7 +78,7 @@ npm run build
 npm link    # `claude-trail`과 `claude-trail-hook`을 글로벌에서 사용 가능하게 함
 ```
 
-링크를 제거하려면 `npm unlink -g claude-trail`을 사용합니다.
+링크를 제거하려면 `npm unlink -g @ohgyeongtaek/claude-trail`을 사용합니다.
 
 ## 빠른 시작
 
