@@ -1,9 +1,9 @@
 # claude-trail — 설계 문서
 
-> Claude Code가 작업 중에 어떤 파일을 읽고/검색하고/수정하는지를
-> 실시간 CLI 대시보드로 시각화하는 오픈소스 도구.
+> Claude Code의 파일 상호작용, 컨텍스트 경계(`/clear`·`/compact`),
+> 서브에이전트 활동을 실시간 CLI 대시보드로 시각화하는 오픈소스 도구.
 
-- **상태:** Draft v0.7 (2026-05-07)
+- **상태:** Draft v0.8 (2026-05-07)
 - **저자:** 오경택
 - **위치:** `tools/claude-trail/` (현재 repo 내부, 추후 별도 repo로 분리 가능)
 - **라이선스:** MIT
@@ -45,15 +45,16 @@
 ## 4. 아키텍처
 
 ```
-                           ┌────────────────────┐
-                           │  Claude Code 세션  │
-                           └─────────┬──────────┘
-                                     │ tool 실행
-                                     ▼
-                       ┌──────────────────────────┐
-                       │ PostToolUse hook (Claude) │
-                       │ → claude-trail hook        │
-                       └─────────────┬─────────────┘
+                            ┌────────────────────┐
+                            │  Claude Code 세션  │
+                            └─────────┬──────────┘
+                                      │ 5종 hook 발화
+                                      │ (PostToolUse · Session{Start,End}
+                                      │  PreCompact · SubagentStop)
+                                      ▼
+                       ┌──────────────────────────────┐
+                       │ claude-trail hook (단일 진입점)│
+                       └─────────────┬────────────────┘
                                      │ JSON via stdin
                                      ▼
                 ┌──────────────────────────────────────┐
@@ -69,8 +70,9 @@
 **3개 컴포넌트로 분리:**
 
 1. **Hook 어댑터** (`src/hook.ts` → `dist/hook.js`)
-   Claude의 PostToolUse hook이 stdin으로 JSON을 던지면, 의미 있는 필드만
-   추출해서 events.jsonl에 한 줄 append. 런타임 의존성 없음(Node 표준 라이브러리만).
+   Claude의 5종 hook(PostToolUse, SessionStart, SessionEnd, PreCompact, SubagentStop)이
+   stdin으로 JSON을 던지면, `hook_event_name`으로 분기해 의미 있는 필드만 추출 후
+   events.jsonl에 한 줄 append. 런타임 의존성 없음(Node 표준 라이브러리만).
 2. **이벤트 스토어** (`.claude-trail/events.jsonl`)
    프로젝트 루트의 append-only JSONL 파일. 단순 텍스트라 grep/jq로도 분석 가능.
 3. **뷰어** (`src/commands/watch.ts` → `dist/commands/watch.js`)
@@ -134,6 +136,10 @@ events.jsonl의 한 줄 = 하나의 이벤트. **세 종류**:
 | `ext` | string \| null \| undefined | 확장자. `path.extname(path).toLowerCase()`로 자동 도출. Glob/Grep은 `null`. Task/`_control`에는 없음 |
 | `event` | enum \| undefined | `_control`에서만 사용: `session_start` / `session_end` / `compact` / `subagent_stop` |
 | `meta` | object | 이벤트별 부가정보 (§5.1). 비어 있을 수 있음 |
+
+**TypeScript 타입(개념):** 위 필드는 plain table로 표현되어 있지만 실제로는
+`tool` 값에 따른 *discriminated union* — `types.ts`에서 `FileEvent` / `TaskEvent` /
+`ControlEvent` 세 타입의 합집합으로 정의 (M0의 산출물).
 
 **Why JSONL?** 시간순 append가 자연스럽고, 부분 읽기/스트리밍에 강하며,
 표준 도구(`tail`, `jq`)와 호환. 한 라인 손상이 전체를 망치지 않음.
@@ -208,7 +214,7 @@ Claude Code가 보내는 페이로드와 매핑:
 
 | hook_event_name | 추가 필드 | → events.jsonl |
 |-----------------|---------|---------------|
-| `SubagentStop` | `stop_hook_active`, `subagent_session_id`(있다면) | `{tool:"_control", event:"subagent_stop", session:<subagent>, meta:{parent_task_id}}` |
+| `SubagentStop` | `stop_hook_active`(재진입 방지 플래그 — 무시), `subagent_session_id`(있다면) | `{tool:"_control", event:"subagent_stop", session:<subagent>, meta:{parent_task_id}}` |
 
 **서브에이전트 내부 tool 호출 attribution (best-effort, v0.1):**
 
@@ -222,6 +228,9 @@ Claude Code가 보내는 페이로드와 매핑:
    - 휴리스틱은 watch에서만 적용. events.jsonl 자체는 raw 그대로 유지 → v0.2 정식 attribution
      로직이 같은 파일을 재해석할 수 있음.
 3. **표시:** 매칭된 서브에이전트의 tool 이벤트는 Stream에서 한 단계 들여쓰기 + `[<subagent_type>]` 라벨.
+4. **Nested 서브에이전트(Task → Task):** v0.1은 **1단계 들여쓰기로 평탄화**.
+   2단계 이상(서브가 또 다른 서브를 spawn)은 같은 들여쓰기 깊이에 `[parent▸child]`
+   결합 라벨로 표시. 깊이별 들여쓰기는 v0.2.
 
 **입력 크기 한계 + cwd 결정 우선순위:**
 - stdin은 buffered 1-shot read (Claude가 `tool_response` 큰 본문도 보낼 수 있음).
@@ -236,11 +245,14 @@ Claude Code가 보내는 페이로드와 매핑:
 
 ```
 claude-trail <command> [options]
+claude-trail --version
+claude-trail --help
 
 Commands:
   watch              실시간 TUI 대시보드 시작
   init               현재 프로젝트에 hook 설치 (.claude/settings.json)
-  hook               (내부) PostToolUse hook의 stdin 어댑터
+  init --remove      이 도구가 등록한 hook만 안전하게 제거
+  hook               (내부) Claude Code 5종 hook의 stdin 어댑터
   replay <session>   (v0.2) 세션 정적 재생
 
 Options for `watch`:
@@ -269,18 +281,18 @@ Options for `watch`:
 ```
 ┌─ claude-trail · live ───── filter: ext=all tools=Read ─────┐
 │ session fcfacf43… · uptime 03:22                            │
-│ Reads 32  Edits 4  Writes 1  Globs 2  Greps 7              │
+│ Reads 32  Edits 4  Writes 1  Globs 2  Greps 7  Tasks 2     │
 ├─────────────────────────────────────────────────────────────┤
 │ Stream                                                      │
-│  14:32:18  READ   src/components/cards/Card.tsx             │
-│  14:32:11  GREP   "useState" in src/                        │
+│  14:32:18 [fcfa] READ   src/components/cards/Card.tsx       │
+│  14:32:11 [fcfa] GREP   "useState" in src/                  │
 │ ─── 14:32:00  /compact (auto) ───────────────────────────── │
-│  14:31:55  READ   gatsby-config.js                          │
-│  14:31:40  TASK   ⮕ Explore: "Find OAuth handlers"          │
-│  14:31:42    ↳ READ  src/auth/oauth.ts        [Explore]     │
-│  14:31:45    ↳ GREP  "callback" in src/auth/  [Explore]     │
-│  14:31:51    ✓ Explore done · 1.3s · 4 calls                │
-│  14:31:52  EDIT   src/utils/animation/anim.ts               │
+│  14:31:55 [fcfa] READ   gatsby-config.js                    │
+│  14:31:40 [fcfa] TASK   ⮕ Explore: "Find OAuth handlers"    │
+│  14:31:42 [a3b1]   ↳ READ  src/auth/oauth.ts   [Explore]    │
+│  14:31:45 [a3b1]   ↳ GREP  "callback" in auth/ [Explore]    │
+│  14:31:51 [a3b1]   ✓ Explore done · 1.3s · 4 calls          │
+│  14:31:52 [fcfa] EDIT   src/utils/animation/anim.ts         │
 │ ─── 14:30:00  session start (clear) ────────────────────── │
 │  …                                                          │
 ├─────────────────────────────────────────────────────────────┤
@@ -308,8 +320,9 @@ Options for `watch`:
 
 색상은 Ink의 `<Text color>`로:
 - `Read` → cyan, `Edit` → yellow, `Write` → magenta,
-  `Glob`/`Grep` → green.
+  `Glob`/`Grep` → green, `Task` → **brightBlue + bold** (Write/magenta와 분리).
 - 막대는 dim, 카운트는 bold.
+- 세션 short id `[xxxx]`은 §9의 FNV-1a 매핑 색.
 
 **경로 표시 규칙 (Stream + Top files 공통):**
 - 파일명만이 아니라 **프로젝트 루트 기준 상대경로 전체**를 표시.
@@ -334,7 +347,7 @@ Options for `watch`:
   사용자가 `c` 핫키(v0.2)로 리셋할 수 있는 시점을 시각적으로 안내.
 
 **서브에이전트 표시:**
-- Task 호출 라인: `TASK   ⮕ <subagent_type>: "<description>"` (magenta + bold).
+- Task 호출 라인: `TASK   ⮕ <subagent_type>: "<description>"` (brightBlue + bold).
 - 서브에이전트의 내부 tool 호출(매칭된 경우): **2 spaces 들여쓰기 + `↳ ` 마커 + `[<subagent_type>]` 우측 라벨**. 매칭 안 되면 일반 라인으로 (다른 session_id로만 보임).
 - `subagent_stop` 이벤트: `   ✓ <subagent_type> done · <duration> · <N> calls` (green + dim).
 - 서브에이전트의 내부 tool은 **부모의 Top files 집계에 포함**(파일 접근 자체는 같은 코드베이스).
@@ -343,8 +356,10 @@ Options for `watch`:
 
 **Top files 집계 룰:**
 - 카운트 대상: `Read` + `Edit` + `Write` 합산.
-  `Glob`/`Grep`은 *Stream에만* 노출하고 파일 단위 집계에서 제외
-  (검색은 "파일 접근"이 아니라 "탐색").
+  `Glob`/`Grep`/`Task`는 *Stream에만* 노출하고 파일 단위 집계에서 제외
+  (검색은 "파일 접근"이 아니라 "탐색"; Task는 호출 메타데이터일 뿐 path 없음).
+- **서브에이전트의 내부 Read/Edit/Write도 합산** — 같은 코드베이스 접근이므로
+  부모와 같은 행에 누적 (라벨 미부착). v0.2의 `--exclude-subagents`로 분리 가능.
 - 정렬: 호출 수 내림차순 → 동률 시 최근 접근이 위.
 - 표시 N: 화면 높이에 따라 4–8개 동적.
 - 필터 적용 시: 현재 필터에 부합하는 파일만 후보.
@@ -493,7 +508,13 @@ tools/claude-trail/
 }
 ```
 
-`SessionStart`/`SessionEnd`/`PreCompact`은 tool 매처가 없는 hook이라 `matcher` 필드 생략.
+`SessionStart`/`SessionEnd`/`PreCompact`/`SubagentStop`은 tool 매처가 없는 hook이라
+`matcher` 필드 생략.
+
+**Hook 명령 경로 정책:** v0.1은 *프로젝트 내장* 모드 — `node ./tools/claude-trail/dist/hook.js`
+는 Claude Code가 hook 실행 시 cwd를 프로젝트 루트로 둔다고 가정 (실측 후 보정).
+경로가 깨질 위험이 보이면 `node ${CLAUDE_PROJECT_DIR}/tools/claude-trail/dist/hook.js`로
+fallback. v0.3 글로벌 설치(`npm i -g`) 시 `claude-trail-hook` 바이너리로 단순화.
 
 `claude-trail init`이 위 파일을 안전하게 생성/병합. 동작 룰:
 
@@ -505,6 +526,16 @@ tools/claude-trail/
   공존 가능.
 - 다른 도구의 PostToolUse 항목들은 절대 건드리지 않음.
 - 작성 전 사용자에게 변경될 부분을 diff로 보여주고 `y` 확인.
+
+**Uninstall (`init --remove`):**
+- settings.json에서 **claude-trail의 hook command를 가진 항목만** 정밀 제거.
+  command 문자열에 `claude-trail/dist/hook.js`(또는 `claude-trail-hook`)을 포함하는
+  것이 식별 키.
+- 비어진 hook 배열(예: PostToolUse가 빈 배열이 되면)은 함께 삭제하여 settings.json을
+  깔끔하게 유지.
+- 다른 도구의 hook 항목은 절대 건드리지 않음.
+- `.claude-trail/` 디렉터리(events.jsonl, hook.error.log)는 **자동 삭제 안 함** —
+  사용자가 명시적으로 `--purge` 주면 같이 삭제.
 
 **매처 선정 근거 (v0.1):**
 v0.1은 *"파일 상호작용 + 컨텍스트 경계"*를 좁게 정의.
@@ -585,16 +616,19 @@ events.jsonl을 실시간으로 따라잡기 위한 알고리즘:
 
 | 레벨 | 대상 | 도구 |
 |------|------|------|
-| Unit | hook 매핑 (§5.1), filters, paths, formatPath (§7) | `node --test` (Node 내장) |
-| Integration | 가짜 페이로드 stdin → hook → events.jsonl 검증 | 위와 동일 |
-| Snapshot | Ink 컴포넌트 출력 (Stream, TopFiles, Header) | `ink-testing-library` |
-| E2E (smoke) | `init` → 가짜 hook 호출 → `watch` 1회 렌더 | 셸 스크립트 |
+| Unit | hook 매핑 (§5.1), filters, paths, formatPath (§7), subagent attribution (§5.1.3) | `node --test` (Node 내장) |
+| Integration | 가짜 페이로드 stdin → hook → events.jsonl 검증 (5종 hook 모두) | 위와 동일 |
+| Snapshot | Ink 컴포넌트 출력 (Stream, TopFiles, Header, ControlMarker, SubagentBlock) | `ink-testing-library` |
+| E2E (smoke) | `init` → 가짜 hook 호출 → `watch` 1회 렌더 → `init --remove` | 셸 스크립트 |
 | Type | 컴파일 자체가 타입 검증 | `tsc --noEmit` (CI) |
 
 **핵심 negative tests:**
 - hook이 *어떤 입력에도* exit 0인가 (잘못된 JSON, 빈 stdin, 누락 필드, 거대 페이로드).
 - events.jsonl이 read-only일 때 hook이 작업을 막지 않는가.
 - 손상된 라인이 섞인 events.jsonl에서 watch가 정상 라인을 정확히 표시하는가.
+- 동시 다중 서브에이전트에서 attribution 휴리스틱이 결정적(deterministic)으로 동작하는가
+  — 같은 입력 시퀀스에 대해 항상 같은 매칭.
+- `init --remove`가 다른 도구의 hook을 건드리지 않는가.
 
 CI: GitHub Actions, Node 18/20/22 매트릭스. Windows 별도 잡(`windows-latest`).
 
@@ -625,31 +659,41 @@ CI: GitHub Actions, Node 18/20/22 매트릭스. Windows 별도 잡(`windows-late
 
 | 버전 | 기능 |
 |------|------|
-| v0.1 | watch (live) + init + hook + md/all 필터 |
-| v0.2 | replay, --ext 커스텀, 세션 셀렉터, 카운터 리셋, MultiEdit/Task 매핑 |
-| v0.3 | 글로벌 설치 (`npm i -g`), `~/.claude-trail/` 통합, Bash 옵트인 매핑 |
-| v0.4 | HTML export (정적 리포트), 세션 비교 |
+| v0.1 | watch(live) + init/`init --remove` + 5종 hook + 확장자/tool 필터 + control 이벤트(`/clear`,`/compact`) + 서브에이전트 호출 가시화(best-effort attribution) |
+| v0.2 | replay, `--ext` 커스텀, 세션 셀렉터(`--session`), 카운터 리셋(`c`), MultiEdit/NotebookEdit 매핑, 서브에이전트 정식 attribution(공식 필드), `--include-prompts`/`--include-task-prompts` 옵트인, `--exclude-subagents`, `--lookback`, 멀티 tool 선택, 비대화 init(`--yes`) |
+| v0.3 | 글로벌 설치 (`npm i -g`), `~/.claude-trail/` 통합, Bash 옵트인 매핑, 일자별 롤오버 + 100MB 상한, `init --include-bash` |
+| v0.4 | HTML export(정적 리포트), 세션 비교, "현재 컨텍스트 살아있는 파일" 스냅샷(transcript 파싱) |
 | v1.0 | 별도 repo 분리, npm 정식 배포 |
 
 ## 17. 구현 단계 (마일스톤)
 
 1. **M0 — TypeScript 부트스트랩**
-   - `tsconfig.json`, `package.json` (build/dev 스크립트), `bin/claude-trail.js` 래퍼
-   - `src/types.ts`: 이벤트/페이로드 타입 (§5, §5.1)
+   - `tsconfig.json`, `package.json` (build/dev 스크립트)
+   - `bin/claude-trail.js` 래퍼 + `bin/claude-trail-hook.js` 별도 래퍼 (§10 진입점 분리)
+   - `src/types.ts`: discriminated union 타입 — `FileEvent` / `TaskEvent` / `ControlEvent` (§5, §5.1)
    - `dist/`까지 빌드 동작 확인
-2. **M1 — 데이터 파이프라인**
+2. **M0.5 — Hook payload 실측 (구현 전 1회)**
+   - 임시 hook(stdin → `.claude-trail/payload-samples/<event>.json` 덤프)을 settings.json에 등록.
+   - 실제 Claude Code 세션에서 다음 시나리오 1회씩 수행:
+     - 일반 Read/Edit/Write/Glob/Grep
+     - `/clear` (SessionEnd → SessionStart 시퀀스 검증, Q9)
+     - `/compact` (manual 1회, auto 자연 발생 1회)
+     - Task로 서브에이전트 호출 1회 + 동시 2개 호출 1회 (Q11/Q12)
+   - 수집된 샘플로 §5.1 매핑 테이블 확정. parent_session_id 같은 공식 필드 발견 시 §5.1.3 경로 1번 사용, 아니면 fallback 휴리스틱 채택.
+   - 결과를 §18 Q9/Q11/Q12에 반영(해소 또는 fallback 확정).
+3. **M1 — 데이터 파이프라인**
    - `cli.ts` 골격 (watch/init 디스패치)
    - `hook.ts`: stdin → JSONL append — **별도 진입점**, React/Ink 미참조
      - `hook_event_name` 분기로 5종(`PostToolUse`/`SessionStart`/`SessionEnd`/`PreCompact`/`SubagentStop`) 처리 (§5.1)
      - Task 매핑: subagent_type, description, task_id 생성 (§5.1.3)
    - `lib/paths.ts`: 프로젝트 루트 결정 (§15)
-   - 수동 검증:
-     - `echo '{"hook_event_name":"PostToolUse","tool_name":"Read","tool_input":{"file_path":"a.ts"}}' | node dist/hook.js`
-     - `echo '{"hook_event_name":"PostToolUse","tool_name":"Task","tool_input":{"subagent_type":"Explore","description":"..."}}' | node dist/hook.js`
-     - `echo '{"hook_event_name":"PreCompact","trigger":"auto"}' | node dist/hook.js`
-     - `echo '{"hook_event_name":"SubagentStop"}' | node dist/hook.js`
+   - 수동 검증 (M0.5에서 캡처한 실제 샘플 사용):
+     - `cat .claude-trail/payload-samples/PostToolUse.Read.json | node dist/hook.js`
+     - `cat .claude-trail/payload-samples/PostToolUse.Task.json | node dist/hook.js`
+     - `cat .claude-trail/payload-samples/PreCompact.json | node dist/hook.js`
+     - `cat .claude-trail/payload-samples/SubagentStop.json | node dist/hook.js`
    - 5ms 타이밍 측정 (`time` 명령) 회귀 방지
-3. **M2 — TUI 골격**
+4. **M2 — TUI 골격**
    - Ink + JSX(.tsx) 셋업
    - `lib/tail.ts`: prefill + fs.watch + offset/inode 추적 (§13.1)
    - `commands/watch.tsx`: events.jsonl tail
@@ -659,19 +703,20 @@ CI: GitHub Actions, Node 18/20/22 매트릭스. Windows 별도 잡(`windows-late
    - `ui/SubagentBlock.tsx`: Task 호출 + 들여쓰기된 자식 라인 + done 마커 (§7)
    - `lib/subagent.ts`: best-effort attribution (§5.1.3) — 부모 task_id 매칭
    - `lib/session-color.ts`: FNV-1a → 8색 매핑 (§9)
-4. **M3 — 누적 통계**
+5. **M3 — 누적 통계**
    - Top files 막대 그래프 (§7 룰, 경로 전체 표시)
-   - Tool별 카운터
-5. **M4 — 필터**
+   - Tool별 카운터 (Tasks 포함)
+6. **M4 — 필터**
    - 확장자: `--md`, `--all` 플래그 + `f` 핫키 토글
-   - Tool: `--tools <list>` 플래그 + `t` 핫키 사이클
+   - Tool: `--tools <list>` 플래그 + `t` 핫키 사이클 (Task 포함)
    - 두 필터의 AND 결합, 헤더에 상태 표시
    - control 이벤트는 tool 필터 무시 (§8)
-6. **M5 — 설치 명령**
-   - `claude-trail init`
-   - 기존 settings.json 안전 병합
-7. **M6 — 문서화 + 배포 준비**
-   - README, 스크린샷, 라이선스 명확화
+7. **M5 — 설치/제거 명령**
+   - `claude-trail init` + `claude-trail init --remove` (§11)
+   - 기존 settings.json 안전 병합 + 정밀 제거
+8. **M6 — 문서화 + 배포 준비**
+   - README (Privacy notice, Quick start, Hook 위치, 제거 방법, 알려진 한계 — 동시 다중 서브에이전트 misattribution 가능 등)
+   - 스크린샷, 라이선스 명확화
 
 각 마일스톤 끝에 사용자에게 확인 받음.
 
