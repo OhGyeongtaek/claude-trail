@@ -56,10 +56,10 @@ async function main(argv: string[]): Promise<number> {
       const { runWatch } = await import('./commands/watch.js');
       return runWatch(rest);
     }
-    case 'init':
-      process.stderr.write('claude-trail: `init` is not implemented yet (M5).\n');
-      void rest;
-      return 1;
+    case 'init': {
+      const { runInit } = await import('./commands/init.js');
+      return runInit(rest);
+    }
     case 'hook':
       process.stderr.write(
         'claude-trail: `hook` should be invoked via bin/claude-trail-hook.js, not the main CLI.\n',
