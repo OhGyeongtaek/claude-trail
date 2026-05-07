@@ -176,5 +176,8 @@ export type HookPayload =
 
 export interface FilterState {
   ext: 'all' | 'md';
+  /** Optional explicit extension whitelist (e.g. {".ts",".tsx"}). When set,
+   *  takes precedence over `ext` for non-Task file events. Issue #4. */
+  extSet?: ReadonlySet<string>;
   tools: ReadonlySet<FileToolName | 'Task'> | 'all';
 }

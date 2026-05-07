@@ -152,9 +152,13 @@ function sameToolPreset(a: FilterState['tools'], b: FilterState['tools']): boole
 
 export function matchesFilter(e: TrailEvent, f: FilterState): boolean {
   if (e.tool === '_control') return true;
-  if (f.ext === 'md' && e.tool !== 'Task') {
-    if (e.ext !== '.md' && e.ext !== '.mdx' && e.ext !== '.markdown') {
-      return false;
+  if (e.tool !== 'Task') {
+    if (f.extSet) {
+      if (!e.ext || !f.extSet.has(e.ext)) return false;
+    } else if (f.ext === 'md') {
+      if (e.ext !== '.md' && e.ext !== '.mdx' && e.ext !== '.markdown') {
+        return false;
+      }
     }
   }
   if (f.tools !== 'all') {

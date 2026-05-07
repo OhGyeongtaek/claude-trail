@@ -230,6 +230,25 @@ test('matchesFilter tools whitelist drops Edit when only Read allowed', () => {
   assert.equal(matchesFilter(e, READ_ONLY_FILTER), false);
 });
 
+test('matchesFilter extSet: keeps allowed ext, drops others, Task always passes ext check', () => {
+  const f: FilterState = {
+    ext: 'all',
+    tools: 'all',
+    extSet: new Set(['.ts', '.tsx']),
+  };
+  const tsEvt = readEvent({ ts: '2026-05-07T01:00:00.000Z', session: 'A', path: 'a.ts', ext: '.ts' });
+  const mdEvt = readEvent({ ts: '2026-05-07T01:00:00.000Z', session: 'A', path: 'r.md', ext: '.md' });
+  const taskEvt: TrailEvent = {
+    ts: '2026-05-07T01:00:00.000Z',
+    session: 'A',
+    tool: 'Task',
+    meta: { tool_use_id: 't', subagent_type: 'Explore' },
+  };
+  assert.equal(matchesFilter(tsEvt, f), true);
+  assert.equal(matchesFilter(mdEvt, f), false);
+  assert.equal(matchesFilter(taskEvt, f), true);
+});
+
 test('matchesFilter: control events always pass any filter', () => {
   const e = controlEvent({
     ts: '2026-05-07T01:00:00.000Z',

@@ -18,6 +18,8 @@ import { nextToolPreset } from './viewState.js';
 export interface DashboardProps {
   eventsPath: string;
   initialFilter: FilterState;
+  /** Drop prefill events older than this epoch-ms. Issue #4. */
+  sinceCutoffMs?: number;
   /** For tests — lets caller seed events without fs.watch. */
   testHarness?: {
     onReady: (push: (e: TrailEvent) => void) => void;
@@ -59,6 +61,7 @@ function reducer(state: ViewState, action: Action): ViewState {
 export const Dashboard: React.FC<DashboardProps> = ({
   eventsPath,
   initialFilter,
+  sinceCutoffMs,
   testHarness,
 }) => {
   const [state, dispatch] = useReducer(reducer, initialState(initialFilter));
@@ -96,8 +99,14 @@ export const Dashboard: React.FC<DashboardProps> = ({
       tail = startTail({
         path: eventsPath,
         onPrefill: (events) => {
-          dispatch({ type: 'addPrefill', events });
-          const last = events[events.length - 1];
+          const filtered = sinceCutoffMs !== undefined
+            ? events.filter((e) => {
+                const ms = Date.parse(e.ts);
+                return Number.isFinite(ms) && ms >= sinceCutoffMs;
+              })
+            : events;
+          dispatch({ type: 'addPrefill', events: filtered });
+          const last = filtered[filtered.length - 1];
           if (last) setActiveSession(last.session);
         },
         onEvent: (e) => {
@@ -120,7 +129,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
       clearInterval(statsTimer);
       if (tail) tail.stop();
     };
-  }, [eventsPath, testHarness]);
+  }, [eventsPath, testHarness, sinceCutoffMs]);
 
   // Uptime tick.
   useEffect(() => {

@@ -61,7 +61,7 @@ function pad2(n: number): string {
 }
 
 function describeFilter(f: FilterState): string {
-  const ext = `ext=${f.ext}`;
+  const ext = f.extSet ? `ext=${[...f.extSet].sort().join(',')}` : `ext=${f.ext}`;
   const tools = f.tools === 'all' ? 'tools=all' : `tools=${[...f.tools].join(',')}`;
   return `${ext} ${tools}`;
 }
