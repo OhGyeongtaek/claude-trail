@@ -11,6 +11,8 @@ import {
   topFilesList,
   nextToolPreset,
   TOOL_PRESETS,
+  renderableText,
+  filterBySearch,
 } from '../src/ui/viewState.js';
 import type { TrailEvent, FilterState } from '../src/types.js';
 
@@ -258,6 +260,38 @@ test('matchesFilter: control events always pass any filter', () => {
   });
   assert.equal(matchesFilter(e, MD_FILTER), true);
   assert.equal(matchesFilter(e, READ_ONLY_FILTER), true);
+});
+
+// — search filter (issue #5) —
+
+test('renderableText covers tool, path, agent, query, control event name', () => {
+  const r = readEvent({ ts: '2026-05-07T01:00:00.000Z', session: 'A', path: 'src/foo.ts' });
+  assert.match(renderableText(r).toLowerCase(), /read.*foo\.ts/);
+  const ctrl = controlEvent({
+    ts: '2026-05-07T01:00:00.000Z',
+    session: 'A',
+    event: 'compact',
+    meta: { trigger: 'manual' },
+  });
+  assert.match(renderableText(ctrl).toLowerCase(), /compact.*manual/);
+});
+
+test('filterBySearch returns all on empty query, otherwise substring case-insensitive', () => {
+  const events: TrailEvent[] = [
+    readEvent({ ts: '2026-05-07T01:00:00.000Z', session: 'A', path: 'src/foo.ts' }),
+    readEvent({ ts: '2026-05-07T01:00:01.000Z', session: 'A', path: 'README.md', ext: '.md' }),
+  ];
+  assert.equal(filterBySearch(events, '').length, 2);
+  assert.equal(filterBySearch(events, 'FOO').length, 1);
+  assert.equal(filterBySearch(events, 'readme').length, 1);
+  assert.equal(filterBySearch(events, 'nope').length, 0);
+});
+
+test('totalSeen monotonically increments per accepted event', () => {
+  let s = initialState(ALL_FILTER);
+  s = step(s, readEvent({ ts: '2026-05-07T01:00:00.000Z', session: 'A', path: 'a.ts' }));
+  s = step(s, readEvent({ ts: '2026-05-07T01:00:01.000Z', session: 'A', path: 'b.ts' }));
+  assert.equal(s.totalSeen, 2);
 });
 
 // — sessions tracking (issue #1) —

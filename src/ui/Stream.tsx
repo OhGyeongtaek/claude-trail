@@ -16,7 +16,8 @@ export interface StreamProps {
 }
 
 export const Stream: React.FC<StreamProps> = ({ events, width, height }) => {
-  // Show the most recent `height` events.
+  // Caller is responsible for slicing/filtering; we only render up to `height`
+  // entries from the tail of the provided array.
   const visible = events.slice(-Math.max(1, height));
   // Show per-line `[xxxx]` session tag only when multiple sessions are
   // present in the visible window — avoids clutter in the common single-

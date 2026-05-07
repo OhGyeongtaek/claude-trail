@@ -7,6 +7,7 @@ import type { TrailEvent, FilterState } from '../types.js';
 import {
   initialState,
   step,
+  filterBySearch,
   type ViewState,
 } from './viewState.js';
 import { Header } from './Header.js';
@@ -66,6 +67,16 @@ export const Dashboard: React.FC<DashboardProps> = ({
 }) => {
   const [state, dispatch] = useReducer(reducer, initialState(initialFilter));
   const [activeSession, setActiveSession] = useState<string | null>(null);
+  // Scrollback / search state machine (issue #5).
+  // mode === 'live': follow tail.
+  // mode === 'paused': scrollAnchor is set to state.totalSeen at pause time;
+  //   pendingNew = state.totalSeen - scrollAnchor.
+  // mode === 'searching': inline search input active. Filter applies in
+  //   live + paused modes once searchQuery is non-empty.
+  const [mode, setMode] = useState<'live' | 'paused' | 'searching'>('live');
+  const [scrollAnchor, setScrollAnchor] = useState<number | null>(null);
+  const [scrollExtra, setScrollExtra] = useState<number>(0);
+  const [searchQuery, setSearchQuery] = useState<string>('');
   const [startedAt] = useState<number>(Date.now());
   const [now, setNow] = useState<number>(Date.now());
   const [tailErrors, setTailErrors] = useState<number>(0);
@@ -137,14 +148,70 @@ export const Dashboard: React.FC<DashboardProps> = ({
     return () => clearInterval(t);
   }, []);
 
+  const pageSize = Math.max(1, Math.floor(rows / 2));
+
+  const enterPaused = (extraDelta: number): void => {
+    setMode('paused');
+    setScrollAnchor((cur) => (cur === null ? state.totalSeen : cur));
+    setScrollExtra((x) => x + extraDelta);
+  };
+  const resumeLive = (): void => {
+    setMode('live');
+    setScrollAnchor(null);
+    setScrollExtra(0);
+  };
+
   useInput(
     (input, key) => {
+      // Search input mode owns most keystrokes.
+      if (mode === 'searching') {
+        if (key.escape) {
+          setSearchQuery('');
+          setMode(scrollAnchor === null ? 'live' : 'paused');
+          return;
+        }
+        if (key.return) {
+          // Commit query — keep filter, exit input mode.
+          setMode(scrollAnchor === null ? 'live' : 'paused');
+          return;
+        }
+        if (key.backspace || key.delete) {
+          setSearchQuery((q) => q.slice(0, -1));
+          return;
+        }
+        if (input && !key.ctrl && !key.meta && input.length === 1) {
+          setSearchQuery((q) => q + input);
+          return;
+        }
+        return;
+      }
+      // Non-search modes.
       if (input === 'q' || (key.ctrl && input === 'c')) {
         exit();
+      } else if (key.escape) {
+        if (searchQuery) setSearchQuery('');
+        if (mode === 'paused') resumeLive();
+      } else if (input === '/') {
+        setMode('searching');
       } else if (input === 'f') {
         dispatch({ type: 'cycleExt' });
       } else if (input === 't') {
         dispatch({ type: 'cycleTools' });
+      } else if (key.pageUp) {
+        enterPaused(pageSize);
+      } else if (key.upArrow) {
+        enterPaused(1);
+      } else if (key.pageDown || key.downArrow) {
+        // Scroll toward newest.
+        const step = key.pageDown ? pageSize : 1;
+        if (mode === 'paused') {
+          if (scrollExtra > 0) {
+            setScrollExtra((x) => Math.max(0, x - step));
+          } else {
+            // At anchor; downArrow / PgDn through pendingNew → resume live.
+            resumeLive();
+          }
+        }
       }
     },
     { isActive: !!process.stdin.isTTY },
@@ -158,11 +225,28 @@ export const Dashboard: React.FC<DashboardProps> = ({
   // Reserved: header(4) + 2 separators + footer(1) + slack(1) = 8.
   // TopFiles gets ~1/3, Stream gets remainder. TopFiles disappears
   // first when window shrinks below ~12 rows.
-  const reserved = 8;
+  const showStatusBar = mode !== 'live' || searchQuery.length > 0;
+  const reserved = 8 + (showStatusBar ? 1 : 0);
   const flexRows = Math.max(3, rows - reserved);
   const showTopFiles = state.topFiles.size > 0 && flexRows >= 8;
   const topFilesHeight = showTopFiles ? Math.min(8, Math.floor(flexRows / 3)) : 0;
   const streamHeight = flexRows - topFilesHeight;
+
+  // Apply search filter, then derive scrollback window.
+  const filteredEvents = filterBySearch(state.events, searchQuery);
+  const pendingNew = scrollAnchor !== null
+    ? Math.max(0, state.totalSeen - scrollAnchor)
+    : 0;
+  // Window end: in live mode end = filteredEvents.length. In paused mode the
+  // end backs up by pendingNew + scrollExtra so the user keeps the same view
+  // as new events arrive. Search is applied to the (capped) events buffer
+  // first; pendingNew is measured pre-filter, so values may slightly under-
+  // shoot in heavy-filter cases — acceptable for a status indicator.
+  const endIdx = mode === 'paused'
+    ? Math.max(0, filteredEvents.length - pendingNew - scrollExtra)
+    : filteredEvents.length;
+  const startIdx = Math.max(0, endIdx - streamHeight);
+  const visibleEvents = filteredEvents.slice(startIdx, endIdx);
   const uptimeSec = Math.floor((now - startedAt) / 1000);
   const ruleWidth = Math.max(0, cols - 1);
 
@@ -177,7 +261,15 @@ export const Dashboard: React.FC<DashboardProps> = ({
         sessions={state.sessions}
         nowMs={now}
       />
-      <Stream events={state.events} width={cols} height={streamHeight} />
+      <Stream events={visibleEvents} width={cols} height={streamHeight} />
+      {showStatusBar ? (
+        <StatusBar
+          width={cols}
+          mode={mode}
+          searchQuery={searchQuery}
+          pendingNew={pendingNew}
+        />
+      ) : null}
       {showTopFiles ? (
         <>
           <Text dimColor>{'─'.repeat(ruleWidth)}</Text>
@@ -206,6 +298,28 @@ function pickInt(...values: Array<number | string | undefined>): number {
   return 0;
 }
 
+const StatusBar: React.FC<{
+  width: number;
+  mode: 'live' | 'paused' | 'searching';
+  searchQuery: string;
+  pendingNew: number;
+}> = ({ width, mode, searchQuery, pendingNew }) => {
+  let left = '';
+  if (mode === 'searching') {
+    left = `/${searchQuery}_`;
+  } else if (mode === 'paused') {
+    left = `PAUSED — ${pendingNew} new event${pendingNew === 1 ? '' : 's'}`;
+    if (searchQuery) left += `  /${searchQuery}`;
+  } else if (searchQuery) {
+    left = `/${searchQuery}`;
+  }
+  return (
+    <Box width={width}>
+      <Text color={mode === 'paused' ? 'yellow' : 'cyan'}>{left}</Text>
+    </Box>
+  );
+};
+
 const Footer: React.FC<{
   width: number;
   errors: number;
@@ -215,7 +329,7 @@ const Footer: React.FC<{
   const showStats = errors + parseErrors + oversize > 0;
   return (
     <Box justifyContent="space-between" width={width}>
-      <Text dimColor>q quit · f ext-filter · t tools</Text>
+      <Text dimColor>q quit · f ext · t tools · / search · ↑/PgUp scroll · Esc resume</Text>
       {showStats ? (
         <Text dimColor>{`errs:${errors} parse:${parseErrors} drop:${oversize}`}</Text>
       ) : (

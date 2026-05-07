@@ -35,9 +35,12 @@ export interface ViewState {
   streamCap: number;
   /** Active filter state. */
   filter: FilterState;
+  /** Monotonically increasing count of events accepted into `events`
+   *  (post-absorption, post-filter). Used as a pause anchor for scrollback. */
+  totalSeen: number;
 }
 
-const DEFAULT_STREAM_CAP = 200;
+const DEFAULT_STREAM_CAP = 1000;
 // /compact byproducts (SubagentStop + SessionStart source:"compact") arrive
 // within milliseconds of PreCompact in our captures. 30s is a generous slack
 // to absorb them without swallowing unrelated events.
@@ -52,6 +55,7 @@ export function initialState(filter: FilterState, streamCap = DEFAULT_STREAM_CAP
     sessions: new Map(),
     streamCap,
     filter,
+    totalSeen: 0,
   };
 }
 
@@ -98,6 +102,7 @@ export function step(prev: ViewState, e: TrailEvent): ViewState {
 
   // Stream window.
   prev.events.push(e);
+  prev.totalSeen += 1;
   if (prev.events.length > prev.streamCap) {
     prev.events.splice(0, prev.events.length - prev.streamCap);
   }
@@ -206,6 +211,43 @@ function pruneCompactWindows(
   for (const [k, v] of map) {
     if (nowMs - v.tsMs > COMPACT_ABSORB_MS) map.delete(k);
   }
+}
+
+// — Stream search (issue #5) —
+
+/**
+ * Searchable text representation of an event. Pure / synchronous so the
+ * search filter can run on every keystroke without React work.
+ */
+export function renderableText(e: TrailEvent): string {
+  if (e.tool === '_control') {
+    const meta = e.meta as unknown as Record<string, unknown>;
+    const extra =
+      typeof meta['source'] === 'string' ? meta['source']
+      : typeof meta['reason'] === 'string' ? meta['reason']
+      : typeof meta['trigger'] === 'string' ? meta['trigger']
+      : typeof meta['agent_type'] === 'string' ? meta['agent_type']
+      : '';
+    return `${e.event} ${extra}`;
+  }
+  if (e.tool === 'Task') {
+    const meta = e.meta as { subagent_type?: string; description?: string };
+    return `Task ${meta.subagent_type ?? ''} ${meta.description ?? ''}`;
+  }
+  const meta = e.meta as { agent_type?: string; query?: string; pattern?: string };
+  return [
+    e.tool,
+    e.path ?? '',
+    meta.query ?? '',
+    meta.pattern ?? '',
+    meta.agent_type ?? '',
+  ].join(' ');
+}
+
+export function filterBySearch(events: TrailEvent[], q: string): TrailEvent[] {
+  const needle = q.trim().toLowerCase();
+  if (!needle) return events;
+  return events.filter((e) => renderableText(e).toLowerCase().includes(needle));
 }
 
 /** Top-N files derived from topFiles map. */
