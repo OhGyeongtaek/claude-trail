@@ -126,11 +126,15 @@ export async function runWatch(argv: string[]): Promise<number> {
   }
 
   const app = render(
-    <Dashboard
-      eventsPath={eventsPath}
-      initialFilter={filter}
-      sinceCutoffMs={sinceCutoffMs}
-    />,
+    sinceCutoffMs !== undefined ? (
+      <Dashboard
+        eventsPath={eventsPath}
+        initialFilter={filter}
+        sinceCutoffMs={sinceCutoffMs}
+      />
+    ) : (
+      <Dashboard eventsPath={eventsPath} initialFilter={filter} />
+    ),
     { exitOnCtrlC: false },
   );
 

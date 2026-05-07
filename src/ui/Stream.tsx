@@ -7,6 +7,7 @@ import type { TrailEvent, FileEvent, TaskEvent, ControlEvent } from '../types.js
 import { ControlMarker } from './ControlMarker.js';
 import { formatLocalTime } from './formatTime.js';
 import { ellipsizePath, splitPath } from './formatPath.js';
+import { sessionColor, shortSessionId } from '../lib/sessionColor.js';
 
 export interface StreamProps {
   events: TrailEvent[];
@@ -17,24 +18,45 @@ export interface StreamProps {
 export const Stream: React.FC<StreamProps> = ({ events, width, height }) => {
   // Show the most recent `height` events.
   const visible = events.slice(-Math.max(1, height));
+  // Show per-line `[xxxx]` session tag only when multiple sessions are
+  // present in the visible window — avoids clutter in the common single-
+  // session case. Spec: issue #1.
+  const sessionsInView = new Set(visible.map((e) => e.session));
+  const showTag = sessionsInView.size >= 2;
   return (
     <Box flexDirection="column">
       {visible.map((e, i) => (
-        <EventLine key={i} event={e} width={width} />
+        <EventLine key={i} event={e} width={width} showTag={showTag} />
       ))}
     </Box>
   );
 };
 
-const EventLine: React.FC<{ event: TrailEvent; width: number }> = ({ event, width }) => {
+const EventLine: React.FC<{ event: TrailEvent; width: number; showTag: boolean }> = ({
+  event,
+  width,
+  showTag,
+}) => {
+  const tag = showTag
+    ? { short: shortSessionId(event.session), color: sessionColor(event.session) }
+    : null;
   if (event.tool === '_control') {
-    return <ControlMarker event={event as ControlEvent} width={width} />;
+    return <ControlMarker event={event as ControlEvent} width={width} tag={tag} />;
   }
   if (event.tool === 'Task') {
-    return <TaskLine event={event as TaskEvent} width={width} />;
+    return <TaskLine event={event as TaskEvent} width={width} tag={tag} />;
   }
-  return <FileLine event={event as FileEvent} width={width} />;
+  return <FileLine event={event as FileEvent} width={width} tag={tag} />;
 };
+
+type SessionTag = { short: string; color: string } | null;
+
+const TagPrefix: React.FC<{ tag: SessionTag }> = ({ tag }) =>
+  tag ? <Text color={tag.color}>{`[${tag.short}] `}</Text> : null;
+
+function tagWidth(tag: SessionTag): number {
+  return tag ? tag.short.length + 3 : 0;
+}
 
 interface ToolGlyph {
   marker: string;
@@ -50,18 +72,20 @@ const TOOL_GLYPHS: Record<string, ToolGlyph> = {
   Grep: { marker: 'g', label: 'GREP ', color: 'green' },
 };
 
-const FileLine: React.FC<{ event: FileEvent; width: number }> = ({ event, width }) => {
+const FileLine: React.FC<{ event: FileEvent; width: number; tag: SessionTag }> = ({ event, width, tag }) => {
   const ts = formatLocalTime(event.ts);
   const glyph = TOOL_GLYPHS[event.tool] ?? { marker: '?', label: event.tool.padEnd(5), color: 'white' };
   const isSubagent = !!(event.meta as { agent_id?: string }).agent_id;
   const indent = isSubagent ? '  ↳ ' : '  ';
-  const fixedPrefixWidth = ts.length + 1 + 1 + 1 + glyph.label.length + 1 + indent.length;
+  const fixedPrefixWidth =
+    tagWidth(tag) + ts.length + 1 + 1 + 1 + glyph.label.length + 1 + indent.length;
   const remaining = Math.max(20, width - fixedPrefixWidth - subagentLabelWidth(event));
   const pathDisplay = makePathDisplay(event, remaining);
   const tail = subagentLabel(event);
 
   return (
     <Text>
+      <TagPrefix tag={tag} />
       <Text dimColor>{ts} </Text>
       <Text color={glyph.color}>{glyph.marker} </Text>
       <Text color={glyph.color} bold>
@@ -112,12 +136,13 @@ function subagentLabelWidth(e: FileEvent | TaskEvent): number {
   return lbl ? lbl.length + 1 : 0;
 }
 
-const TaskLine: React.FC<{ event: TaskEvent; width: number }> = ({ event, width }) => {
+const TaskLine: React.FC<{ event: TaskEvent; width: number; tag: SessionTag }> = ({ event, width, tag }) => {
   const ts = formatLocalTime(event.ts);
   const meta = event.meta;
-  const text = `⮕ ${meta.subagent_type}: "${truncate(meta.description, Math.max(20, width - 30))}"`;
+  const text = `⮕ ${meta.subagent_type}: "${truncate(meta.description, Math.max(20, width - 30 - tagWidth(tag)))}"`;
   return (
     <Text>
+      <TagPrefix tag={tag} />
       <Text dimColor>{ts} </Text>
       <Text color="blueBright" bold>
         T TASK

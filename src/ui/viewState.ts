@@ -15,6 +15,11 @@ export interface Counters {
   Task: number;
 }
 
+export interface SessionInfo {
+  firstSeenMs: number;
+  lastSeenMs: number;
+}
+
 export interface ViewState {
   /** Display-eligible events in arrival order, capped at `streamCap`. */
   events: TrailEvent[];
@@ -24,6 +29,8 @@ export interface ViewState {
   topFiles: Map<string, number>;
   /** Pending /compact absorption window per session. */
   pendingCompact: Map<string, { tsMs: number }>;
+  /** Per-session tracking for multi-session display (issue #1). */
+  sessions: Map<string, SessionInfo>;
   /** Stream cap (matches TUI height-derived value). */
   streamCap: number;
   /** Active filter state. */
@@ -42,6 +49,7 @@ export function initialState(filter: FilterState, streamCap = DEFAULT_STREAM_CAP
     counters: { Read: 0, Edit: 0, Write: 0, Glob: 0, Grep: 0, Task: 0 },
     topFiles: new Map(),
     pendingCompact: new Map(),
+    sessions: new Map(),
     streamCap,
     filter,
   };
@@ -53,6 +61,15 @@ export function initialState(filter: FilterState, streamCap = DEFAULT_STREAM_CAP
  * but the wrapper object is fresh, so React equality checks still trigger.
  */
 export function step(prev: ViewState, e: TrailEvent): ViewState {
+  // Track session presence — even absorbed/filtered events count.
+  const tsMs = parseTs(e.ts);
+  const existing = prev.sessions.get(e.session);
+  if (existing) {
+    existing.lastSeenMs = Math.max(existing.lastSeenMs, tsMs);
+  } else {
+    prev.sessions.set(e.session, { firstSeenMs: tsMs, lastSeenMs: tsMs });
+  }
+
   // Absorption pass first: /compact byproducts get dropped from `events`
   // (and counters), but PreCompact itself stays.
   const absorbed = isAbsorbed(e, prev.pendingCompact);

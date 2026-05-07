@@ -260,6 +260,21 @@ test('matchesFilter: control events always pass any filter', () => {
   assert.equal(matchesFilter(e, READ_ONLY_FILTER), true);
 });
 
+// — sessions tracking (issue #1) —
+
+test('sessions map records firstSeen/lastSeen per session', () => {
+  let s = initialState(ALL_FILTER);
+  s = step(s, readEvent({ ts: '2026-05-07T01:00:00.000Z', session: 'A', path: 'a.ts' }));
+  s = step(s, readEvent({ ts: '2026-05-07T01:00:05.000Z', session: 'B', path: 'b.ts' }));
+  s = step(s, readEvent({ ts: '2026-05-07T01:00:10.000Z', session: 'A', path: 'c.ts' }));
+  assert.equal(s.sessions.size, 2);
+  const a = s.sessions.get('A')!;
+  assert.equal(a.firstSeenMs, Date.parse('2026-05-07T01:00:00.000Z'));
+  assert.equal(a.lastSeenMs, Date.parse('2026-05-07T01:00:10.000Z'));
+  const b = s.sessions.get('B')!;
+  assert.equal(b.firstSeenMs, b.lastSeenMs);
+});
+
 // — tool presets (issue #2) —
 
 test('nextToolPreset cycles all → R/E/W → R → Task → all', () => {

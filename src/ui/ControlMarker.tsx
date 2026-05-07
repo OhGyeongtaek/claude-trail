@@ -9,17 +9,20 @@ import { formatLocalTime } from './formatTime.js';
 export interface ControlMarkerProps {
   event: ControlEvent;
   width: number;
+  tag?: { short: string; color: string } | null;
 }
 
-export const ControlMarker: React.FC<ControlMarkerProps> = ({ event, width }) => {
+export const ControlMarker: React.FC<ControlMarkerProps> = ({ event, width, tag }) => {
   const ts = formatLocalTime(event.ts);
   const label = describeControl(event);
   const inner = ` ${ts}  ${label} `;
-  const tailLen = Math.max(0, width - 4 - inner.length);
+  const tagW = tag ? tag.short.length + 3 : 0;
+  const tailLen = Math.max(0, width - 4 - inner.length - tagW);
   const left = '─── ';
   const right = ' ' + '─'.repeat(tailLen);
   return (
     <Text dimColor>
+      {tag ? <Text color={tag.color}>{`[${tag.short}] `}</Text> : null}
       {left}
       <Text bold>{inner}</Text>
       {right}

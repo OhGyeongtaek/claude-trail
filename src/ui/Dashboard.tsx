@@ -174,6 +174,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
         counters={state.counters}
         filter={state.filter}
         width={cols}
+        sessions={state.sessions}
+        nowMs={now}
       />
       <Stream events={state.events} width={cols} height={streamHeight} />
       {showTopFiles ? (
