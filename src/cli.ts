@@ -52,11 +52,12 @@ async function main(argv: string[]): Promise<number> {
   }
 
   switch (cmd) {
-    case 'watch':
-      process.stderr.write('claude-trail: `watch` is not implemented yet (M1).\n');
-      return 1;
+    case 'watch': {
+      const { runWatch } = await import('./commands/watch.js');
+      return runWatch(rest);
+    }
     case 'init':
-      process.stderr.write('claude-trail: `init` is not implemented yet (M2).\n');
+      process.stderr.write('claude-trail: `init` is not implemented yet (M5).\n');
       void rest;
       return 1;
     case 'hook':
