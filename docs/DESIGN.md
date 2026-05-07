@@ -3,7 +3,7 @@
 > Claude Code가 작업 중에 어떤 파일을 읽고/검색하고/수정하는지를
 > 실시간 CLI 대시보드로 시각화하는 오픈소스 도구.
 
-- **상태:** Draft v0.5 (2026-05-07)
+- **상태:** Draft v0.6 (2026-05-07)
 - **저자:** 오경택
 - **위치:** `tools/claude-trail/` (현재 repo 내부, 추후 별도 repo로 분리 가능)
 - **라이선스:** MIT
@@ -37,6 +37,7 @@
 |---|---------|------------|----------|
 | S1 | "지금 Claude가 뭘 보고 있지?" | 작업 중 다른 터미널에 `claude-trail watch` | 실시간 스트림 + 누적 통계 |
 | S2 | "마크다운 문서 위주로만 보고 싶다" | `claude-trail watch --md` 또는 TUI에서 `f` | md/mdx/markdown만 노출 |
+| S2b | "Read만 보고 싶다" (Edit/Write/Glob/Grep 노이즈 제거) | `claude-trail watch --tools Read` 또는 TUI에서 `t` | Read 이벤트만 노출 |
 | S3 | "어디에 접근이 몰리지?" | 같은 watch 화면 | Top files 막대그래프 |
 | S4 | "이 세션 끝나고 회고하고 싶다" | (v0.2) `claude-trail replay <session>` | 정적 타임라인 출력 |
 
@@ -196,25 +197,30 @@ Commands:
   replay <session>   (v0.2) 세션 정적 재생
 
 Options for `watch`:
-  --md               마크다운 파일만 (.md, .mdx, .markdown)
-  --all              모든 파일 (기본)
+  --md               마크다운 파일만 (.md, .mdx, .markdown) — 확장자 필터
+  --all              모든 파일 (기본) — 확장자 필터
+  --tools <list>     콤마 구분 tool 화이트리스트. 예: --tools Read 또는 --tools Read,Edit
+                     기본: all (Read,Edit,Write,Glob,Grep). control 이벤트는 항상 표시
   --ext <list>       (v0.2) 콤마 구분 확장자, 예: --ext .md,.mdx
   --session <id>     (v0.2) 특정 세션만
   --since <duration> (v0.2) 최근 N (예: 10m, 1h)
 ```
 
+`--md`와 `--tools`는 *직교적*으로 적용 (AND 결합). 예) `--md --tools Read`는 "Read한 마크다운만".
+
 ### TUI 핫키
 
 | 키 | 동작 |
 |----|------|
-| `f` | 필터 모드 사이클: all → md → all |
+| `f` | **확장자 필터** 사이클: all → md → all |
+| `t` | **Tool 필터** 사이클: all → Read → Edit → Write → Glob → Grep → all |
 | `q` / `Ctrl+C` | 종료 |
 | `c` | 화면 카운터 리셋 (v0.2) |
 
 ## 7. TUI 화면 설계
 
 ```
-┌─ claude-trail · live ─────────────────────── filter: all ──┐
+┌─ claude-trail · live ───── filter: ext=all tools=Read ─────┐
 │ session fcfacf43… · uptime 03:22                            │
 │ Reads 32  Edits 4  Writes 1  Globs 2  Greps 7              │
 ├─────────────────────────────────────────────────────────────┤
@@ -232,7 +238,7 @@ Options for `watch`:
 │  █████     gatsby-config.js                           5x    │
 │  ███       packages/web/package.json                  3x    │
 │  ██        src/index.ts                               2x    │
-└─ q quit · f filter ─────────────────────────────────────────┘
+└─ q quit · f ext-filter · t tool-filter ─────────────────────┘
 ```
 
 세 영역으로 구성:
@@ -286,19 +292,33 @@ Options for `watch`:
 
 ## 8. 필터 시스템
 
-세 가지 레이어로 동작:
+**두 개의 직교 차원 + 세 레이어로 구성:**
 
+차원:
+- **확장자 필터** (`f` 핫키, `--md`/`--all` 플래그) — `ext` 필드 기준
+- **Tool 필터** (`t` 핫키, `--tools` 플래그) — `tool` 필드 기준
+
+두 필터는 AND로 결합. 예) `f=md` + `t=Read` → "Read한 마크다운만".
+
+레이어:
 1. **수집 단계**: hook은 모든 이벤트를 무조건 기록. 필터링 안 함.
    (이유: 다른 필터로 같은 데이터를 재해석할 수 있어야 함.)
-2. **CLI 플래그**: `watch --md` 같은 시작 시점 필터.
-3. **TUI 핫키**: 실행 중 동적 토글 (`f`).
+2. **CLI 플래그**: `watch --md --tools Read` 같은 시작 시점 필터.
+3. **TUI 핫키**: 실행 중 동적 토글 (`f`, `t`).
 
-**프리셋 정의:**
+**확장자 필터 프리셋:**
 - `all`: 필터 없음.
 - `md`: `.md`, `.mdx`, `.markdown`.
 - 향후: `code` (.js/.ts/.jsx/...), `config` (json/yaml/toml), `docs` (md+txt+rst).
 
-필터는 표시(stream + top files)에만 영향. 헤더 카운터는 `(필터 N / 전체 M)` 둘 다 노출.
+**Tool 필터:**
+- `all`: 5종 모두 (`Read`,`Edit`,`Write`,`Glob`,`Grep`).
+- 단일 선택: `Read` / `Edit` / `Write` / `Glob` / `Grep`.
+- 멀티 선택은 CLI 플래그(`--tools Read,Edit`)에서만 v0.1 지원. TUI는 단일 사이클(v0.2에서 멀티).
+- **Control 이벤트(`_control`)는 tool 필터의 영향을 받지 않음** — 컨텍스트 경계는 항상 보이는 것이 안전.
+
+**필터는 표시(stream + top files)에만 영향.** 헤더 카운터는 `(필터 N / 전체 M)` 둘 다 노출.
+필터 상태는 헤더에 `filter: ext=md tools=Read` 형식으로 한 줄 표시.
 
 ## 9. 다중 세션 처리 (v0.1)
 
@@ -571,8 +591,10 @@ CI: GitHub Actions, Node 18/20/22 매트릭스. Windows 별도 잡(`windows-late
    - Top files 막대 그래프 (§7 룰, 경로 전체 표시)
    - Tool별 카운터
 5. **M4 — 필터**
-   - `--md`, `--all` 플래그
-   - `f` 핫키 토글
+   - 확장자: `--md`, `--all` 플래그 + `f` 핫키 토글
+   - Tool: `--tools <list>` 플래그 + `t` 핫키 사이클
+   - 두 필터의 AND 결합, 헤더에 상태 표시
+   - control 이벤트는 tool 필터 무시 (§8)
 6. **M5 — 설치 명령**
    - `claude-trail init`
    - 기존 settings.json 안전 병합
