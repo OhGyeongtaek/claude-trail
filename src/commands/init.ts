@@ -47,11 +47,11 @@ export async function runInit(argv: string[]): Promise<number> {
   return runInstall(settingsPath, existing, args);
 }
 
-function runInstall(
+async function runInstall(
   settingsPath: string,
   existing: Settings | null,
   args: InitArgs,
-): number {
+): Promise<number> {
   const { settings, changes } = planInstall(existing);
   const dirtyChanges = changes.filter((c) => c.action !== 'unchanged');
 
@@ -62,7 +62,7 @@ function runInstall(
 
   printInstallDiff(settingsPath, dirtyChanges);
 
-  if (!args.yes && !confirm()) {
+  if (!args.yes && !(await confirm())) {
     process.stdout.write('claude-trail: aborted.\n');
     return 1;
   }
@@ -72,12 +72,12 @@ function runInstall(
   return 0;
 }
 
-function runRemove(
+async function runRemove(
   settingsPath: string,
   existing: Settings | null,
   args: InitArgs,
   projectRoot: string,
-): number {
+): Promise<number> {
   if (existing === null) {
     process.stdout.write('claude-trail: no settings.json found, nothing to remove.\n');
     if (args.purge) purgeTrailDir(projectRoot);
@@ -93,7 +93,7 @@ function runRemove(
 
   printRemoveDiff(settingsPath, changes);
 
-  if (!args.yes && !confirm()) {
+  if (!args.yes && !(await confirm())) {
     process.stdout.write('claude-trail: aborted.\n');
     return 1;
   }
@@ -144,32 +144,25 @@ function printRemoveDiff(path: string, changes: RemoveChange[]): void {
   process.stdout.write('\n');
 }
 
-function confirm(): boolean {
-  // Only attempt interactive read when stdin is a TTY. Otherwise default
-  // to "no" to avoid silent surprises in pipelines — pass --yes to override.
+async function confirm(): Promise<boolean> {
+  // Default to "no" in pipelines to avoid silent surprises — pass --yes to override.
   if (!process.stdin.isTTY) {
     process.stderr.write(
       'claude-trail: stdin is not a TTY. Re-run with --yes to skip the confirmation prompt.\n',
     );
     return false;
   }
-  process.stdout.write('Apply these changes? [y/N]: ');
-  const buf = Buffer.alloc(1024);
-  let read = 0;
+  const readline = await import('node:readline/promises');
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout,
+  });
   try {
-    read = readSyncFromTTY(buf);
-  } catch {
-    return false;
+    const answer = (await rl.question('Apply these changes? [y/N]: ')).trim().toLowerCase();
+    return answer === 'y' || answer === 'yes';
+  } finally {
+    rl.close();
   }
-  if (read <= 0) return false;
-  const answer = buf.subarray(0, read).toString('utf8').trim().toLowerCase();
-  return answer === 'y' || answer === 'yes';
-}
-
-function readSyncFromTTY(buf: Buffer): number {
-  // Avoid `prompts` dependency; readSync against fd 0 gets one line.
-  const fs = require('node:fs') as typeof import('node:fs');
-  return fs.readSync(0, buf, 0, buf.length, null);
 }
 
 function purgeTrailDir(projectRoot: string): void {

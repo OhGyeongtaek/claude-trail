@@ -1,6 +1,6 @@
 {
   "name": "@ohgyeongtaek/claude-trail",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Real-time TUI dashboard for Claude Code: visualize file interactions, context boundaries (/clear, /compact), and subagent activity.",
   "type": "module",
   "bin": {
