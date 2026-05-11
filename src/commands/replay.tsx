@@ -5,7 +5,12 @@
 import React, { useEffect, useState } from 'react';
 import { Box, Text, render, useApp, useInput, useStdout } from 'ink';
 import type { TrailEvent } from '../types.js';
-import { resolveProjectRoot, eventsLogPath } from '../lib/paths.js';
+import {
+  resolveProjectRoot,
+  eventsLogPath,
+  sessionEventsLogPath,
+  isValidSessionId,
+} from '../lib/paths.js';
 import { Stream } from '../ui/Stream.js';
 import {
   parseReplayArgs,
@@ -28,14 +33,22 @@ export async function runReplay(argv: string[]): Promise<number> {
     return 2;
   }
 
-  const projectRoot = resolveProjectRoot();
-  const path = eventsLogPath(projectRoot);
+  let path: string;
+  let sessionFilter: (events: TrailEvent[]) => TrailEvent[];
+  if (parsed.ephemeral) {
+    if (!isValidSessionId(parsed.sessionId)) {
+      process.stderr.write(`claude-trail replay: invalid session id "${parsed.sessionId}"\n`);
+      return 2;
+    }
+    path = sessionEventsLogPath(parsed.sessionId);
+    // Ephemeral files are already per-session; no further filtering needed.
+    sessionFilter = (e) => e;
+  } else {
+    path = eventsLogPath(resolveProjectRoot());
+    sessionFilter = (e) => filterSession(e, parsed.sessionId);
+  }
   const all = await loadEvents(path);
-  const sessionEvents = filterTimeSlice(
-    filterSession(all, parsed.sessionId),
-    parsed.from,
-    parsed.to,
-  );
+  const sessionEvents = filterTimeSlice(sessionFilter(all), parsed.from, parsed.to);
 
   if (sessionEvents.length === 0) {
     process.stderr.write(

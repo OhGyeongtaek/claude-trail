@@ -11,24 +11,28 @@ export interface ReplayArgs {
   sessionId: string;
   from?: string;
   to?: string;
+  ephemeral?: boolean;
 }
 
 export function parseReplayArgs(argv: string[]): ReplayArgs | { error: string } {
   let sessionId: string | undefined;
   let from: string | undefined;
   let to: string | undefined;
+  let ephemeral = false;
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i]!;
     if (a === '--from') {
       from = argv[++i];
     } else if (a === '--to') {
       to = argv[++i];
+    } else if (a === '--ephemeral') {
+      ephemeral = true;
     } else if (!a.startsWith('-') && !sessionId) {
       sessionId = a;
     }
   }
   if (!sessionId) {
-    return { error: 'usage: claude-trail replay <session_id> [--from HH:MM:SS] [--to HH:MM:SS]' };
+    return { error: 'usage: claude-trail replay <session_id> [--ephemeral] [--from HH:MM:SS] [--to HH:MM:SS]' };
   }
   if (from !== undefined && !HHMMSS.test(from)) {
     return { error: `invalid --from "${from}" (expected HH:MM:SS)` };
@@ -39,6 +43,7 @@ export function parseReplayArgs(argv: string[]): ReplayArgs | { error: string } 
   const out: ReplayArgs = { sessionId };
   if (from !== undefined) out.from = from;
   if (to !== undefined) out.to = to;
+  if (ephemeral) out.ephemeral = true;
   return out;
 }
 

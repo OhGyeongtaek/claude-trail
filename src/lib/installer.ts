@@ -5,7 +5,13 @@
 // commands/init.ts. This module is unit-testable without filesystem.
 
 const HOOK_COMMAND = 'claude-trail-hook';
+const HOOK_COMMAND_EPHEMERAL = 'claude-trail-hook --ephemeral';
 const POST_TOOL_USE_MATCHER = 'Read|Edit|Write|Glob|Grep|Agent';
+
+export interface PlanInstallOptions {
+  /** When true, install hooks that write to per-session ephemeral storage. */
+  ephemeral?: boolean;
+}
 
 const HOOK_EVENTS = [
   'PostToolUse',
@@ -62,14 +68,18 @@ export interface InstallResult {
  * - Updates matcher only if our command exists with a different matcher.
  * - Leaves other tools' hooks untouched.
  */
-export function planInstall(prev: Settings | null | undefined): InstallResult {
+export function planInstall(
+  prev: Settings | null | undefined,
+  opts: PlanInstallOptions = {},
+): InstallResult {
+  const command = opts.ephemeral ? HOOK_COMMAND_EPHEMERAL : HOOK_COMMAND;
   const settings: Settings = clone(prev ?? {});
   if (!settings.hooks) settings.hooks = {};
   const hooks = settings.hooks;
   const changes: InstallChange[] = [];
 
   for (const event of HOOK_EVENTS) {
-    const want = wantedEntry(event);
+    const want = wantedEntry(event, command);
     const arr: HookEntry[] = hooks[event] ?? [];
     const existingIdx = arr.findIndex((h) => entryHasFingerprint(h));
 
@@ -78,7 +88,7 @@ export function planInstall(prev: Settings | null | undefined): InstallResult {
       const change: InstallChange = {
         event,
         action: 'added',
-        command: HOOK_COMMAND,
+        command,
       };
       if (want.matcher) change.matcher = want.matcher;
       changes.push(change);
@@ -89,7 +99,7 @@ export function planInstall(prev: Settings | null | undefined): InstallResult {
         const change: InstallChange = {
           event,
           action: 'unchanged',
-          command: HOOK_COMMAND,
+          command,
         };
         if (want.matcher) change.matcher = want.matcher;
         changes.push(change);
@@ -102,7 +112,7 @@ export function planInstall(prev: Settings | null | undefined): InstallResult {
         const change: InstallChange = {
           event,
           action: 'matcher-updated',
-          command: HOOK_COMMAND,
+          command,
         };
         if (want.matcher) change.matcher = want.matcher;
         changes.push(change);
@@ -172,8 +182,8 @@ export function entryHasFingerprint(entry: HookEntry): boolean {
   );
 }
 
-function wantedEntry(event: HookEventName): HookEntry {
-  const hook: SingleHook = { type: 'command', command: HOOK_COMMAND };
+function wantedEntry(event: HookEventName, command: string): HookEntry {
+  const hook: SingleHook = { type: 'command', command };
   if (event === 'PostToolUse') {
     return { matcher: POST_TOOL_USE_MATCHER, hooks: [hook] };
   }
@@ -186,6 +196,7 @@ function clone<T>(o: T): T {
 
 export const __exports_for_test = {
   HOOK_COMMAND,
+  HOOK_COMMAND_EPHEMERAL,
   POST_TOOL_USE_MATCHER,
   HOOK_EVENTS,
   FINGERPRINTS,

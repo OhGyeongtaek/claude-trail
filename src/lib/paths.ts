@@ -1,7 +1,9 @@
 // Path resolution — project root + absolute→relative normalization.
 // Spec: docs/DESIGN.md §5.1.3, §15.
 
-import { isAbsolute, relative, extname } from 'node:path';
+import { isAbsolute, relative, extname, join } from 'node:path';
+import { tmpdir, homedir } from 'node:os';
+import { readdirSync, statSync } from 'node:fs';
 
 export interface PathContext {
   /** Effective project root used for relative-path conversion. */
@@ -68,4 +70,79 @@ export function hookErrorLogPath(projectRoot: string): string {
 /** Directory holding both event log and error log. */
 export function trailDir(projectRoot: string): string {
   return `${projectRoot}/.claude-trail`;
+}
+
+// -----------------------------------------------------------------------------
+// Ephemeral (per-session, auto-discarded) mode — installed via `init --ephemeral`.
+// Data lives outside the project tree and is keyed by Claude session id so a new
+// session starts with an empty trail. See docs/DESIGN.md §5.1.4.
+// -----------------------------------------------------------------------------
+
+/**
+ * Strict session-id validator. Used before any path join to prevent traversal.
+ * Claude session ids are UUIDs in practice; we accept the broader set of safe
+ * filename chars but reject path separators, dots, and oversize input.
+ */
+export function isValidSessionId(id: unknown): id is string {
+  return typeof id === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(id);
+}
+
+/**
+ * Root directory for ephemeral trails. Prefers XDG_RUNTIME_DIR (per-user,
+ * tmpfs on Linux) and falls back to the OS temp dir.
+ */
+export function ephemeralRoot(): string {
+  const xdg = process.env['XDG_RUNTIME_DIR'];
+  if (xdg && isAbsolute(xdg)) return join(xdg, 'claude-trail');
+  return join(tmpdir(), 'claude-trail');
+}
+
+/** Path to the events log for a single ephemeral session. Throws on bad id. */
+export function sessionEventsLogPath(sessionId: string): string {
+  if (!isValidSessionId(sessionId)) {
+    throw new Error(`invalid session id: ${String(sessionId).slice(0, 32)}`);
+  }
+  return join(ephemeralRoot(), `${sessionId}.jsonl`);
+}
+
+export interface EphemeralSessionInfo {
+  sessionId: string;
+  path: string;
+  mtimeMs: number;
+}
+
+/** List ephemeral sessions, newest first. Silently returns [] if dir missing. */
+export function listEphemeralSessions(): EphemeralSessionInfo[] {
+  const dir = ephemeralRoot();
+  let entries: string[];
+  try {
+    entries = readdirSync(dir);
+  } catch {
+    return [];
+  }
+  const out: EphemeralSessionInfo[] = [];
+  for (const name of entries) {
+    if (!name.endsWith('.jsonl')) continue;
+    const sessionId = name.slice(0, -'.jsonl'.length);
+    if (!isValidSessionId(sessionId)) continue;
+    const path = join(dir, name);
+    try {
+      out.push({ sessionId, path, mtimeMs: statSync(path).mtimeMs });
+    } catch {
+      // skip
+    }
+  }
+  out.sort((a, b) => b.mtimeMs - a.mtimeMs);
+  return out;
+}
+
+/** Most-recently-modified ephemeral session, or null. */
+export function latestEphemeralSession(): EphemeralSessionInfo | null {
+  const list = listEphemeralSessions();
+  return list[0] ?? null;
+}
+
+/** Path to the user-level (global) settings file. */
+export function globalSettingsPath(): string {
+  return join(homedir(), '.claude', 'settings.json');
 }

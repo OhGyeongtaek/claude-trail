@@ -16,20 +16,27 @@ import {
   type RemoveChange,
   type Settings,
 } from '../lib/installer.js';
-import { resolveProjectRoot, trailDir } from '../lib/paths.js';
+import {
+  resolveProjectRoot,
+  trailDir,
+  ephemeralRoot,
+  globalSettingsPath,
+} from '../lib/paths.js';
 
 interface InitArgs {
   remove: boolean;
   purge: boolean;
   yes: boolean;
+  ephemeral: boolean;
 }
 
 export function parseInitArgs(argv: string[]): InitArgs {
-  const out: InitArgs = { remove: false, purge: false, yes: false };
+  const out: InitArgs = { remove: false, purge: false, yes: false, ephemeral: false };
   for (const a of argv) {
     if (a === '--remove') out.remove = true;
     else if (a === '--purge') out.purge = true;
     else if (a === '--yes' || a === '-y') out.yes = true;
+    else if (a === '--ephemeral') out.ephemeral = true;
   }
   return out;
 }
@@ -37,7 +44,9 @@ export function parseInitArgs(argv: string[]): InitArgs {
 export async function runInit(argv: string[]): Promise<number> {
   const args = parseInitArgs(argv);
   const projectRoot = resolveProjectRoot();
-  const settingsPath = join(projectRoot, '.claude', 'settings.json');
+  const settingsPath = args.ephemeral
+    ? globalSettingsPath()
+    : join(projectRoot, '.claude', 'settings.json');
 
   const existing = readSettings(settingsPath);
 
@@ -52,7 +61,7 @@ async function runInstall(
   existing: Settings | null,
   args: InitArgs,
 ): Promise<number> {
-  const { settings, changes } = planInstall(existing);
+  const { settings, changes } = planInstall(existing, { ephemeral: args.ephemeral });
   const dirtyChanges = changes.filter((c) => c.action !== 'unchanged');
 
   if (dirtyChanges.length === 0) {
@@ -61,6 +70,11 @@ async function runInstall(
   }
 
   printInstallDiff(settingsPath, dirtyChanges);
+  if (args.ephemeral) {
+    process.stdout.write(
+      `Ephemeral mode: events go to ${ephemeralRoot()}/<session_id>.jsonl (auto-pruned after 24h).\n\n`,
+    );
+  }
 
   if (!args.yes && !(await confirm())) {
     process.stdout.write('claude-trail: aborted.\n');
@@ -80,14 +94,14 @@ async function runRemove(
 ): Promise<number> {
   if (existing === null) {
     process.stdout.write('claude-trail: no settings.json found, nothing to remove.\n');
-    if (args.purge) purgeTrailDir(projectRoot);
+    if (args.purge) purgeTrailDir(args, projectRoot);
     return 0;
   }
 
   const { settings, changes, totalRemoved } = planRemove(existing);
   if (totalRemoved === 0) {
     process.stdout.write('claude-trail: no claude-trail hooks present.\n');
-    if (args.purge) purgeTrailDir(projectRoot);
+    if (args.purge) purgeTrailDir(args, projectRoot);
     return 0;
   }
 
@@ -100,7 +114,7 @@ async function runRemove(
 
   writeSettings(settingsPath, settings);
   process.stdout.write(`claude-trail: removed ${totalRemoved} hook entries from ${settingsPath}\n`);
-  if (args.purge) purgeTrailDir(projectRoot);
+  if (args.purge) purgeTrailDir(args, projectRoot);
   return 0;
 }
 
@@ -165,8 +179,8 @@ async function confirm(): Promise<boolean> {
   }
 }
 
-function purgeTrailDir(projectRoot: string): void {
-  const dir = trailDir(projectRoot);
+function purgeTrailDir(args: InitArgs, projectRoot: string): void {
+  const dir = args.ephemeral ? ephemeralRoot() : trailDir(projectRoot);
   if (!existsSync(dir)) return;
   rmSync(dir, { recursive: true, force: true });
   process.stdout.write(`claude-trail: purged ${dir}\n`);

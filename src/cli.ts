@@ -29,12 +29,14 @@ Usage:
   claude-trail --help
 
 Commands:
-  watch              Live TUI dashboard (M1)
-  replay <session>   Static walkthrough of a finished session (v0.2)
-  init               Install hooks into .claude/settings.json (M2)
-  init --remove      Remove this tool's hooks
-  hook               (internal) stdin adapter for Claude Code hooks
-                     — invoked via bin/claude-trail-hook.js
+  watch                  Live TUI dashboard (M1)
+  replay <session>       Static walkthrough of a finished session (v0.2)
+  init                   Install hooks into .claude/settings.json (M2)
+  init --remove          Remove this tool's hooks
+  init --ephemeral       Install user-global hooks; per-session ephemeral logs
+  prune [--older-than X] Delete old ephemeral session logs (default: 24h)
+  hook                   (internal) stdin adapter for Claude Code hooks
+                         — invoked via bin/claude-trail-hook.js
 
 See docs/DESIGN.md for full specification.
 `;
@@ -64,6 +66,10 @@ async function main(argv: string[]): Promise<number> {
     case 'init': {
       const { runInit } = await import('./commands/init.js');
       return runInit(rest);
+    }
+    case 'prune': {
+      const { runPrune } = await import('./commands/prune.js');
+      return runPrune(rest);
     }
     case 'hook':
       process.stderr.write(

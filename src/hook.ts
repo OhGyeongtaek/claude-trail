@@ -14,11 +14,22 @@
 // payload is appended to <dir>/payloads.jsonl alongside hook event name +
 // timestamp. Used for fixture generation and field-shape verification.
 
-import { appendFileSync, mkdirSync, statSync } from 'node:fs';
-import { join } from 'node:path';
+import { appendFileSync, mkdirSync, readdirSync, rmSync, statSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import type { HookPayload } from './types.js';
 import { mapPayload, dedupKey } from './lib/events.js';
-import { resolveProjectRoot, eventsLogPath, trailDir } from './lib/paths.js';
+import {
+  resolveProjectRoot,
+  eventsLogPath,
+  trailDir,
+  isValidSessionId,
+  ephemeralRoot,
+  sessionEventsLogPath,
+} from './lib/paths.js';
+
+const EPHEMERAL_FLAG = '--ephemeral';
+const EPHEMERAL_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+const EPHEMERAL_PRUNE_PROBABILITY = 0.01;
 
 const MAX_STDIN_BYTES = 10 * 1024 * 1024;
 const MAX_LINE_BYTES = 1024;
@@ -68,20 +79,55 @@ function isUnderSizeLimit(path: string): boolean {
   }
 }
 
-function writeEventLine(projectRoot: string, line: string): void {
-  const dir = trailDir(projectRoot);
-  const file = eventsLogPath(projectRoot);
-  if (!isUnderSizeLimit(file)) return;
+function writeEventLine(target: { dir: string; file: string }, line: string): void {
+  if (!isUnderSizeLimit(target.file)) return;
 
   // Drop overly large single lines (§11 1KB cap, but allow some slack).
   if (Buffer.byteLength(line, 'utf8') > MAX_LINE_BYTES * 4) return;
 
-  mkdirSync(dir, { recursive: true });
-  appendFileSync(file, line + '\n');
+  mkdirSync(target.dir, { recursive: true, mode: 0o700 });
+  appendFileSync(target.file, line + '\n');
+}
+
+function resolveTarget(
+  ephemeral: boolean,
+  payload: HookPayload,
+  projectRoot: string,
+): { dir: string; file: string } | null {
+  if (!ephemeral) {
+    return { dir: trailDir(projectRoot), file: eventsLogPath(projectRoot) };
+  }
+  const sid = payload.session_id;
+  if (!isValidSessionId(sid)) return null;
+  const file = sessionEventsLogPath(sid);
+  return { dir: dirname(file), file };
+}
+
+function maybePruneEphemeral(): void {
+  if (Math.random() >= EPHEMERAL_PRUNE_PROBABILITY) return;
+  const dir = ephemeralRoot();
+  let entries: string[];
+  try {
+    entries = readdirSync(dir);
+  } catch {
+    return;
+  }
+  const cutoff = Date.now() - EPHEMERAL_MAX_AGE_MS;
+  for (const name of entries) {
+    if (!name.endsWith('.jsonl')) continue;
+    const p = join(dir, name);
+    try {
+      if (statSync(p).mtimeMs < cutoff) rmSync(p, { force: true });
+    } catch {
+      // best-effort
+    }
+  }
 }
 
 async function main(): Promise<void> {
   if (process.stdin.isTTY) return;
+
+  const ephemeral = process.argv.includes(EPHEMERAL_FLAG);
 
   let raw = '';
   try {
@@ -122,10 +168,21 @@ async function main(): Promise<void> {
     return;
   }
 
+  const target = resolveTarget(ephemeral, payload, projectRoot);
+  if (!target) return;
+
   try {
-    writeEventLine(projectRoot, line);
+    writeEventLine(target, line);
   } catch {
     // §13: never block user work on disk failure.
+  }
+
+  if (ephemeral) {
+    try {
+      maybePruneEphemeral();
+    } catch {
+      // best-effort
+    }
   }
 }
 

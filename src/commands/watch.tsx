@@ -4,7 +4,14 @@
 import React from 'react';
 import { render } from 'ink';
 import { Dashboard } from '../ui/Dashboard.js';
-import { resolveProjectRoot, eventsLogPath } from '../lib/paths.js';
+import {
+  resolveProjectRoot,
+  eventsLogPath,
+  latestEphemeralSession,
+  sessionEventsLogPath,
+  isValidSessionId,
+  ephemeralRoot,
+} from '../lib/paths.js';
 import type { FilterState, FileToolName } from '../types.js';
 
 export interface WatchOptions {
@@ -21,6 +28,8 @@ export interface WatchArgsRaw {
   ext?: string;
   /** Raw `--since` value (e.g. "30m"). Issue #4. */
   since?: string;
+  ephemeral?: boolean;
+  session?: string;
 }
 
 export function parseWatchArgs(argv: string[]): WatchArgsRaw {
@@ -45,6 +54,14 @@ export function parseWatchArgs(argv: string[]): WatchArgsRaw {
       const next = argv[i + 1];
       if (next && !next.startsWith('-')) {
         out.since = next;
+        i++;
+      }
+    } else if (a === '--ephemeral') {
+      out.ephemeral = true;
+    } else if (a === '--session') {
+      const next = argv[i + 1];
+      if (next && !next.startsWith('-')) {
+        out.session = next;
         i++;
       }
     }
@@ -107,11 +124,34 @@ export function buildFilterState(raw: WatchArgsRaw): FilterState {
   return extSet ? { ext, tools, extSet } : { ext, tools };
 }
 
+export function resolveWatchEventsPath(raw: WatchArgsRaw): { path: string } | { error: string } {
+  if (raw.session) {
+    if (!isValidSessionId(raw.session)) return { error: `invalid --session "${raw.session}"` };
+    return { path: sessionEventsLogPath(raw.session) };
+  }
+  if (raw.ephemeral) {
+    const latest = latestEphemeralSession();
+    if (!latest) {
+      return {
+        error:
+          `no ephemeral session yet under ${ephemeralRoot()}.\n` +
+          'Start a Claude session with claude-trail installed (`claude-trail init --ephemeral`).',
+      };
+    }
+    return { path: latest.path };
+  }
+  return { path: eventsLogPath(resolveProjectRoot()) };
+}
+
 export async function runWatch(argv: string[]): Promise<number> {
   const raw = parseWatchArgs(argv);
   const filter = buildFilterState(raw);
-  const projectRoot = resolveProjectRoot();
-  const eventsPath = eventsLogPath(projectRoot);
+  const resolved = resolveWatchEventsPath(raw);
+  if ('error' in resolved) {
+    process.stderr.write(`claude-trail watch: ${resolved.error}\n`);
+    return 2;
+  }
+  const eventsPath = resolved.path;
 
   let sinceCutoffMs: number | undefined;
   if (raw.since) {

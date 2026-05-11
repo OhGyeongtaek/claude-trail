@@ -229,12 +229,16 @@ import { parseInitArgs } from '../src/commands/init.js';
 
 test('parseInitArgs: defaults', () => {
   const a = parseInitArgs([]);
-  assert.deepEqual(a, { remove: false, purge: false, yes: false });
+  assert.deepEqual(a, { remove: false, purge: false, yes: false, ephemeral: false });
 });
 
 test('parseInitArgs: --remove --purge -y', () => {
   const a = parseInitArgs(['--remove', '--purge', '-y']);
-  assert.deepEqual(a, { remove: true, purge: true, yes: true });
+  assert.deepEqual(a, { remove: true, purge: true, yes: true, ephemeral: false });
+});
+
+test('parseInitArgs: --ephemeral', () => {
+  assert.equal(parseInitArgs(['--ephemeral']).ephemeral, true);
 });
 
 test('parseInitArgs: --yes equivalent to -y', () => {

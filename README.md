@@ -174,10 +174,45 @@ It shows a diff of planned changes and asks for confirmation. Other tools' hooks
 | Flag | Effect |
 |------|--------|
 | `--remove` | Remove only claude-trail's hook entries |
-| `--purge`  | With `--remove`, also delete `.claude-trail/` |
+| `--purge`  | With `--remove`, also delete trail data |
 | `--yes` / `-y` | Skip the y/N prompt (required for non-TTY use) |
+| `--ephemeral` | Install to **user-global** `~/.claude/settings.json` and write per-session ephemeral logs |
 
 `init` is idempotent: re-running on an already-configured project is a no-op.
+
+### Ephemeral (per-session) mode
+
+By default, claude-trail appends to `<project>/.claude-trail/events.jsonl` forever. If you'd rather not keep history at all — every new Claude session starts blank, old data auto-discards — install in ephemeral mode:
+
+```bash
+claude-trail init --ephemeral
+```
+
+This:
+
+- Writes hooks to **`~/.claude/settings.json`** (applies to every Claude session, every project).
+- Stores each session's events in **`$XDG_RUNTIME_DIR/claude-trail/<session_id>.jsonl`** (falls back to `$TMPDIR` on macOS). A new session = a new file.
+- Auto-prunes files older than 24h on hook activity. Run `claude-trail prune` to do it manually.
+
+View with:
+
+```bash
+claude-trail watch --ephemeral              # live, picks most-recent session
+claude-trail watch --session <session_id>   # a specific one
+claude-trail replay <session_id> --ephemeral
+```
+
+If multiple Claude sessions are running concurrently, `--ephemeral` defaults to the most-recently-active one and lists the others to stderr — use `--session <id>` to pin.
+
+Uninstall: `claude-trail init --remove --ephemeral` (add `--purge` to also delete the trail directory).
+
+### `claude-trail prune`
+
+Delete old ephemeral session logs.
+
+| Flag | Effect |
+|------|--------|
+| `--older-than <Nh\|Nm\|Nd>` | Cutoff (default: `24h`) |
 
 ### How hooks are invoked
 
